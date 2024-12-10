@@ -1,0 +1,16 @@
+[package]
+edition = "2021"
+name = "qr_service"
+version = "0.1.0"
+
+[dependencies]
+actix-web = "4"
+qrcode = "0.14.1"
+image ="0.25"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "qr_benchmark"
+harness = false
