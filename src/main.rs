@@ -56,10 +56,10 @@ async fn create_label() -> impl Responder {
     let code = QrCode::new(r"qr_code.as_bytes()").unwrap();
     let image = code.render::<Luma<u8>>().build();
     image.save("./templates/qr.png").unwrap();
-    let mut result = File::create("./templates/result.html").unwrap();
     let product = Product {
         name: "ss".to_string(),
     };
+    let mut result = File::create("./templates/result.html").unwrap();
     TEMPLATES
         .render_to(
             "template.html",
@@ -67,34 +67,29 @@ async fn create_label() -> impl Responder {
             &mut result,
         )
         .unwrap();
-    let file = NamedFile::open("./templates/result.html").unwrap();
-    info!("2");
-
-    info!("3");
     let tab = CTAB.clone();
-    info!("4");
+    info!("2");
     let current_dir = env::current_dir().unwrap();
     let file_path = current_dir.join("templates/result.html");
-    tab.navigate_to(&format!("file:///{}", file_path.display()))
+    let viewport = tab
+        .navigate_to(&format!("file:///{}", file_path.display()))
+        .unwrap()
+        .wait_for_element("table")
+        .unwrap()
+        .get_box_model()
+        .unwrap()
+        .margin_viewport();
+    let jpeg_data = tab
+        .capture_screenshot(
+            Page::CaptureScreenshotFormatOption::Png,
+            Some(75),
+            Some(viewport),
+            true,
+        )
         .unwrap();
-    info!("5");
-    let elem = tab.find_element("table").unwrap();
-    info!("6");
-    // let jpeg_data = tab
-    //     .capture_screenshot(
-    //         Page::CaptureScreenshotFormatOption::Jpeg,
-    //         None,
-    //         Some(elem.get_box_model().unwrap().content_viewport()),
-    //         true,
-    //     )
-    //     .unwrap();
-    let jpeg_data = elem
-        .capture_screenshot(Page::CaptureScreenshotFormatOption::Png)
-        .unwrap();
-    // Save the screenshot to disc
-    info!("7");
+    info!("3");
     std::fs::write("screenshot.png", jpeg_data).unwrap();
-    file
+    NamedFile::open("screenshot.png").unwrap()
 }
 
 #[actix_web::main] // or #[tokio::main]
