@@ -1,3 +1,4 @@
 /target
-/templates/qr.png
-/templates/result.html
+templates/result.html
+templates/qr.png
+result.png
