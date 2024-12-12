@@ -2009,6 +2009,7 @@ version = "0.1.0"
 dependencies = [
  "actix-files",
  "actix-web",
+ "anyhow",
  "criterion",
  "headless_chrome",
  "image",
@@ -2016,6 +2017,7 @@ dependencies = [
  "qrcode",
  "serde",
  "tera",
+ "thiserror 2.0.6",
  "tracing",
  "tracing-subscriber",
 ]

@@ -1,8 +1,9 @@
-use actix_files::{Files, NamedFile};
-use actix_web::{
-    get, http::header::ContentType, middleware, web, App, HttpResponse, HttpServer, Responder,
-};
-use headless_chrome::{protocol::cdp::Page, Browser, Element, Tab};
+pub mod err;
+
+use actix_files::NamedFile;
+use actix_web::{get, middleware, web, App, HttpResponse, HttpServer, Responder};
+use err::CustomError;
+use headless_chrome::{protocol::cdp::Page, Browser, Tab};
 use image::{ImageFormat, Luma};
 use lazy_static::lazy_static;
 use qrcode::QrCode;
@@ -21,75 +22,65 @@ lazy_static! {
             }
         };
         tera.autoescape_on(vec![".html", ".sql"]);
-        // info!("{:#?}", tera);
         tera
     };
-    pub static ref BROWSER:Browser ={
+    pub static ref BROWSER: Browser = {
         let browser: Browser = Browser::default().unwrap();
         browser
     };
-    pub static ref CTAB:Arc<Tab> ={
+    pub static ref CTAB: Arc<Tab> = {
         let tab = BROWSER.new_tab().unwrap();
         tab
     };
 }
 #[get("/hello/{name}")]
-async fn greet(name: web::Path<String>) -> impl Responder {
-    format!("Hello {name}!")
+async fn greet(name: web::Path<String>) -> Result<impl Responder, CustomError> {
+    Ok(format!("Hello {name}!"))
 }
 #[get("/qr/{qr_code}")]
-async fn get_qr_code(qr_code: web::Path<String>) -> impl Responder {
-    let code = QrCode::new(qr_code.as_bytes()).unwrap();
+async fn get_qr_code(qr_code: web::Path<String>) -> Result<impl Responder, CustomError> {
+    let code = QrCode::new(qr_code.as_bytes())?;
     let image = code.render::<Luma<u8>>().build();
 
-    // image.save("/tmp/qrcode.png").unwrap();
     let mut buffer = Cursor::new(Vec::new());
-    image.write_to(&mut buffer, ImageFormat::Png).unwrap();
-    HttpResponse::Ok()
+    image.write_to(&mut buffer, ImageFormat::Png)?;
+    Ok(HttpResponse::Ok()
         .content_type("image/png")
-        .body(buffer.into_inner())
-    // format!("Hello {qr_code}!")
+        .body(buffer.into_inner()))
 }
 #[get("/label")]
-async fn create_label() -> impl Responder {
+async fn create_label() -> Result<impl Responder, CustomError> {
     info!("1");
-    let code = QrCode::new(r"qr_code.as_bytes()").unwrap();
+    let code = QrCode::new(r"qr_code.as_bytes()")?;
     let image = code.render::<Luma<u8>>().build();
-    image.save("./templates/qr.png").unwrap();
+    image.save("./templates/qr.png")?;
     let product = Product {
         name: "ss".to_string(),
     };
-    let mut result = File::create("./templates/result.html").unwrap();
-    TEMPLATES
-        .render_to(
-            "template.html",
-            &Context::from_serialize(&product).unwrap(),
-            &mut result,
-        )
-        .unwrap();
+    let mut result = File::create("./templates/result.html")?;
+    TEMPLATES.render_to(
+        "template.html",
+        &Context::from_serialize(&product)?,
+        &mut result,
+    )?;
     let tab = CTAB.clone();
     info!("2");
-    let current_dir = env::current_dir().unwrap();
+    let current_dir = env::current_dir()?;
     let file_path = current_dir.join("templates/result.html");
     let viewport = tab
-        .navigate_to(&format!("file:///{}", file_path.display()))
-        .unwrap()
-        .wait_for_element("table")
-        .unwrap()
-        .get_box_model()
-        .unwrap()
+        .navigate_to(&format!("file:///{}", file_path.display()))?
+        .wait_for_element("table")?
+        .get_box_model()?
         .margin_viewport();
-    let jpeg_data = tab
-        .capture_screenshot(
-            Page::CaptureScreenshotFormatOption::Png,
-            Some(75),
-            Some(viewport),
-            true,
-        )
-        .unwrap();
+    let jpeg_data = tab.capture_screenshot(
+        Page::CaptureScreenshotFormatOption::Png,
+        Some(75),
+        Some(viewport),
+        true,
+    )?;
     info!("3");
-    std::fs::write("screenshot.png", jpeg_data).unwrap();
-    NamedFile::open("screenshot.png").unwrap()
+    std::fs::write("screenshot.png", jpeg_data)?;
+    Ok(NamedFile::open("screenshot.png")?)
 }
 
 #[actix_web::main] // or #[tokio::main]
