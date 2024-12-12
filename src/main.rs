@@ -1,13 +1,13 @@
 pub mod err;
-
 use actix_files::NamedFile;
-use actix_web::{get, middleware, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, middleware, post, web, App, HttpResponse, HttpServer, Responder};
 use err::CustomError;
 use headless_chrome::{protocol::cdp::Page, Browser, Tab};
 use image::{ImageFormat, Luma};
 use lazy_static::lazy_static;
 use qrcode::QrCode;
-use serde::Serialize;
+use resvg::{tiny_skia, usvg};
+use serde::{Deserialize, Serialize};
 use std::{env, fs::File, io::Cursor, sync::Arc};
 use tera::{Context, Tera};
 use tracing::info;
@@ -48,19 +48,18 @@ async fn get_qr_code(qr_code: web::Path<String>) -> Result<impl Responder, Custo
         .content_type("image/png")
         .body(buffer.into_inner()))
 }
-#[get("/label")]
-async fn create_label() -> Result<impl Responder, CustomError> {
+#[post("/label")]
+async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
     info!("1");
+    info!("requests: {:#?}", labels);
+
     let code = QrCode::new(r"qr_code.as_bytes()")?;
     let image = code.render::<Luma<u8>>().build();
     image.save("./templates/qr.png")?;
-    let product = Product {
-        name: "ss".to_string(),
-    };
     let mut result = File::create("./templates/result.html")?;
     TEMPLATES.render_to(
         "template.html",
-        &Context::from_serialize(&product)?,
+        &Context::from_serialize(&labels)?,
         &mut result,
     )?;
     let tab = CTAB.clone();
@@ -100,7 +99,27 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await
 }
-#[derive(Serialize)]
-struct Product {
-    name: String,
+
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(rename_all = "PascalCase")]
+struct LabelInfo {
+    /// 类型：1：半成品，2：成品
+    kind: i32,
+
+    /// 订单号
+    order_no: String,
+
+    /// 客户名称
+    customer_name: String,
+
+    /// 型号
+    product_model: String,
+
+    /// 品名
+    commodity: String,
+
+    /// 二维码
+    qr_code: String,
+
+    is_return: bool,
 }
