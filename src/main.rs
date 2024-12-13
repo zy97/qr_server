@@ -1,6 +1,14 @@
 pub mod err;
 use actix_files::NamedFile;
 use actix_web::{get, middleware, post, web, App, HttpResponse, HttpServer, Responder};
+use barcoders::{
+    generators::image::Image,
+    sym::{
+        code128::{self, Code128},
+        code39::Code39,
+        code93,
+    },
+};
 use err::CustomError;
 use headless_chrome::{protocol::cdp::Page, Browser, Tab};
 use image::{ImageFormat, Luma};
@@ -46,6 +54,20 @@ async fn get_qr_code(qr_code: web::Path<String>) -> Result<impl Responder, Custo
         .content_type("image/png")
         .body(buffer.into_inner()))
 }
+#[get("/barcode/{barcode}")]
+async fn get_barcode(barcode: web::Path<String>) -> Result<impl Responder, CustomError> {
+    //code128 生成不了O202400043条形码数据需要加上前缀，查考https://github.com/buntine/barcoders/blob/master/src/sym/code128.rs最后的测试
+    // 但code39可以直接生成
+    let barcode = Code128::new(format!("\u{00C0}{}", barcode)).unwrap();
+    let png = Image::png(5); // You must specify the height in pixels.
+    let encoded = barcode.encode();
+    // Image generators return a Result<Vec<u8>, barcoders::error::Error) of encoded bytes.
+    let bytes = png.generate(&encoded[..]).unwrap();
+
+    Ok(HttpResponse::Ok()
+        .content_type("image/png")
+        .body(Cursor::new(bytes).into_inner()))
+}
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
     let tab = CTAB.clone();
@@ -83,6 +105,29 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
     Ok(NamedFile::open("result.png")?)
 }
 
+// #[post("/label")]
+// async fn create_label11(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
+//     // create a `Browser` that spawns a `chromium` process running with UI (`with_head()`, headless is default)
+//     // and the handler that drives the websocket etc.
+//     let (mut browser, mut handler) =
+//         Browser::launch(BrowserConfig::builder().with_head().build().unwrap())
+//             .await
+//             .unwrap();
+
+//     // spawn a new task that continuously polls the handler
+//     let handle = async_std::task::spawn(async move {
+//         while let Some(h) = handler.next().await {
+//             if h.is_err() {
+//                 break;
+//             }
+//         }
+//     });
+
+//     // create a new browser page and navigate to the url
+//     let page = browser.new_page("https://en.wikipedia.org").await.unwrap();
+//     Ok(format!("Hello !"))
+// }
+
 fn split_info(code: &str) -> TemplateData {
     let infos = code.split('|').collect::<Vec<&str>>();
     TemplateData {
@@ -106,6 +151,7 @@ async fn main() -> std::io::Result<()> {
             .service(greet)
             .service(get_qr_code)
             .service(create_label)
+            .service(get_barcode)
             .wrap(middleware::Logger::default())
     })
     .bind(("127.0.0.1", 8080))?
