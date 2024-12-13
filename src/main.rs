@@ -1,14 +1,7 @@
 pub mod err;
 use actix_files::NamedFile;
 use actix_web::{get, middleware, post, web, App, HttpResponse, HttpServer, Responder};
-use barcoders::{
-    generators::image::Image,
-    sym::{
-        code128::{self, Code128},
-        code39::Code39,
-        code93,
-    },
-};
+use barcoders::{generators::image::Image, sym::code128::Code128};
 use err::CustomError;
 use headless_chrome::{protocol::cdp::Page, Browser, Tab};
 use image::{ImageFormat, Luma};
