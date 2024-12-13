@@ -77,7 +77,8 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
         std::fs::write("result.png", jpeg_data)?;
         Command::new(r".\printer.exe")
             .args(&["result.png"])
-            .output()?;
+            .output()
+            .map_err(|_| CustomError::PrinterNoFound)?;
     }
     Ok(NamedFile::open("result.png")?)
 }
