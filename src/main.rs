@@ -8,9 +8,16 @@ use image::{ImageFormat, Luma};
 use lazy_static::lazy_static;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
-use std::{env, fs::File, io::Cursor, process::Command, sync::Arc};
+use std::{
+    env,
+    fs::File,
+    io::{self, Cursor},
+    process::Command,
+    sync::Arc,
+};
 use tera::{Context, Tera};
-use tracing_subscriber::FmtSubscriber;
+use tracing::info;
+use tracing_subscriber::{fmt::Layer, layer::SubscriberExt, FmtSubscriber};
 lazy_static! {
     pub static ref TEMPLATES: Tera = {
         let mut tera = match Tera::new("templates/**/*.html") {
@@ -135,10 +142,18 @@ fn split_info(code: &str) -> TemplateData {
 }
 #[actix_web::main] // or #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    let file_appender = tracing_appender::rolling::daily("logs", "app.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // 创建一个文件输出层
+    let file_layer = Layer::new().with_writer(non_blocking); // 输出到文件
+
     let subscriber = FmtSubscriber::builder()
         .with_max_level(tracing::Level::INFO)
-        .finish();
+        .finish()
+        .with(file_layer);
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
     HttpServer::new(|| {
         App::new()
             .service(greet)

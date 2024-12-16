@@ -2,3 +2,4 @@
 templates/result.html
 templates/qr.png
 result.png
+logs/*
