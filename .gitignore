@@ -1,5 +1,6 @@
 /target
 templates/result.html
 templates/qr.png
+./templates/qr.png
 result.png
 logs/*
