@@ -7,13 +7,12 @@ version = "0.1.0"
 actix-files = "0.6"
 actix-web = "4"
 anyhow = "1.0.94"
-barcoders = {version = "2.0.0", features = ["image"]}
-headless_chrome = {git = "https://github.com/rust-headless-chrome/rust-headless-chrome", features = ["fetch"]}
+barcoders = { version = "2.0.0", features = ["image"] }
+headless_chrome = { git = "https://github.com/rust-headless-chrome/rust-headless-chrome", features = ["fetch"] }
 image = "0.25"
-lazy_static = "1.5.0"
 qrcode = "0.14.1"
-serde = {version = "1.0.216", features = ["derive"]}
-tera = {version = "1", default-features = false}
+serde = { version = "1.0.216", features = ["derive"] }
+tera = { version = "1", default-features = false }
 thiserror = "2.0.6"
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
@@ -28,9 +27,9 @@ harness = false
 name = "qr_benchmark"
 
 [profile.release]
-codegen-units = 1 
-lto = true 
+codegen-units = 1
+lto = true
 opt-level = "z" # Optimize for size.
 strip = true # Automatically strip symbols from the binary.
-# panic = "abort"
+panic = "abort"
 # upx

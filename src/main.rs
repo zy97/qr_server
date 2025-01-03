@@ -5,7 +5,6 @@ use barcoders::{generators::image::Image, sym::code128::Code128};
 use err::CustomError;
 use headless_chrome::{protocol::cdp::Page, Browser, Tab};
 use image::{ImageFormat, Luma};
-use lazy_static::lazy_static;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -13,32 +12,52 @@ use std::{
     fs::File,
     io::{self, Cursor},
     process::Command,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 use tera::{Context, Tera};
 use tracing::info;
 use tracing_subscriber::{fmt::Layer, layer::SubscriberExt, FmtSubscriber};
-lazy_static! {
-    pub static ref TEMPLATES: Tera = {
-        let mut tera = match Tera::new("templates/**/*.html") {
-            Ok(t) => t,
-            Err(e) => {
-                println!("Parsing error(s): {}", e);
-                ::std::process::exit(1);
-            }
-        };
-        tera.autoescape_on(vec![".html", ".sql"]);
-        tera
+// lazy_static! {
+//     // pub static ref TEMPLATES: Tera = {
+//     //     let mut tera = match Tera::new("templates/**/*.html") {
+//     //         Ok(t) => t,
+//     //         Err(e) => {
+//     //             println!("Parsing error(s): {}", e);
+//     //             ::std::process::exit(1);
+//     //         }
+//     //     };
+//     //     tera.autoescape_on(vec![".html", ".sql"]);
+//     //     tera
+//     // };
+//     pub static ref BROWSER: Browser = {
+//         let browser: Browser = Browser::default().unwrap();
+//         browser
+//     };
+//     pub static ref CTAB: Arc<Tab> = {
+//         let tab = BROWSER.new_tab().unwrap();
+//         tab
+//     };
+// }
+static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
+    let mut tera = match Tera::new("templates/**/*.html") {
+        Ok(t) => t,
+        Err(e) => {
+            println!("Parsing error(s): {}", e);
+            ::std::process::exit(1);
+        }
     };
-    pub static ref BROWSER: Browser = {
-        let browser: Browser = Browser::default().unwrap();
-        browser
-    };
-    pub static ref CTAB: Arc<Tab> = {
-        let tab = BROWSER.new_tab().unwrap();
-        tab
-    };
-}
+    tera.autoescape_on(vec![".html", ".sql"]);
+    tera
+});
+static BROWSER: LazyLock<Browser> = LazyLock::new(|| {
+    let browser: Browser = Browser::default().unwrap();
+    browser
+});
+static CTAB: LazyLock<Arc<Tab>> = LazyLock::new(|| {
+    let tab = BROWSER.new_tab().unwrap();
+    tab
+});
+
 #[get("/hello/{name}")]
 async fn greet(name: web::Path<String>) -> Result<impl Responder, CustomError> {
     Ok(format!("Hello {name}!"))
@@ -97,10 +116,10 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
             true,
         )?;
         std::fs::write("result.png", jpeg_data)?;
-        Command::new(r".\printer.exe")
-            .args(&["result.png"])
-            .output()
-            .map_err(|_| CustomError::PrinterNoFound)?;
+        // Command::new(r".\printer.exe")
+        //     .args(&["result.png"])
+        //     .output()
+        //     .map_err(|_| CustomError::PrinterNoFound)?;
     }
     Ok(NamedFile::open("result.png")?)
 }

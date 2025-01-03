@@ -2032,7 +2032,6 @@ dependencies = [
  "criterion",
  "headless_chrome",
  "image",
- "lazy_static",
  "qrcode",
  "serde",
  "tera",

@@ -6,17 +6,17 @@ use tracing::info;
 
 #[derive(Error, Debug)]
 pub enum CustomError {
-    #[error("Other library error: {0}")]
+    #[error("OtherLibraryError: {0}")]
     OtherLibraryError(String),
-    #[error("Conversion error: {0}")]
+    #[error("QrError: {0}")]
     QrError(#[from] QrError),
-    #[error("Conversion error: {0}")]
+    #[error("ImageError: {0}")]
     ImageError(#[from] ImageError),
-    #[error("Conversion error: {0}")]
+    #[error("IOError: {0}")]
     IOError(#[from] std::io::Error),
-    #[error("Conversion error: {0}")]
+    #[error("TeraError: {0}")]
     TeraError(#[from] tera::Error),
-    #[error("Conversion error: {0}")]
+    #[error("AnyhowError: {0}")]
     AnyhowError(#[from] anyhow::Error),
     #[error("打印程序未找到！")]
     PrinterNoFound,
