@@ -18,6 +18,7 @@ tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-subscriber = "0.3.19"
 # chromiumoxide = "0.7.0"
+# snafu = "0.8.5" #定义的错误只能在同级或子级下使用，
 
 [dev-dependencies]
 criterion = "0.5.1"
