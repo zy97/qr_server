@@ -2029,6 +2029,7 @@ dependencies = [
  "actix-web",
  "anyhow",
  "barcoders",
+ "base64",
  "criterion",
  "headless_chrome",
  "image",

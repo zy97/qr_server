@@ -1,22 +1,26 @@
 pub mod err;
 use actix_files::NamedFile;
 use actix_web::{get, middleware, post, web, App, HttpResponse, HttpServer, Responder};
+use anyhow::Error;
 use barcoders::{generators::image::Image, sym::code128::Code128};
+use base64::{decode, encode, engine::general_purpose, Engine};
 use err::CustomError;
 use headless_chrome::{protocol::cdp::Page, Browser, Tab};
-use image::{ImageFormat, Luma};
+use image::{EncodableLayout, ImageFormat, ImageReader, Luma};
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
     fs::File,
-    io::{self, Cursor},
+    io::{self, Cursor, Read, Write},
+    option,
     process::Command,
     sync::{Arc, LazyLock},
 };
 use tera::{Context, Tera};
 use tracing::info;
 use tracing_subscriber::{fmt::Layer, layer::SubscriberExt, FmtSubscriber};
+
 // lazy_static! {
 //     // pub static ref TEMPLATES: Tera = {
 //     //     let mut tera = match Tera::new("templates/**/*.html") {
@@ -89,12 +93,24 @@ async fn get_barcode(barcode: web::Path<String>) -> Result<impl Responder, Custo
 }
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
+    info!("0");
     let tab = CTAB.clone();
     for label in labels.0 {
         let code = QrCode::new(&label.qr_code)?;
-        let infos = split_info(&label.qr_code);
+        let mut infos = split_info(&label.qr_code);
         let image = code.render::<Luma<u8>>().build();
         image.save("./templates/qr.png")?;
+        info!("00");
+        let img = ImageReader::open("./templates/qr.png")?.decode()?;
+
+        // 将图像编码为 PNG 格式的字节数据
+        let mut img_bytes: Vec<u8> = Vec::new();
+        img.write_to(&mut Cursor::new(&mut img_bytes), image::ImageFormat::Png)?;
+
+        // 将字节数据转换为 Base64
+        let base64_string = general_purpose::STANDARD.encode(&img_bytes);
+        info!("000");
+        infos.qr_code = Some(format!("data:image/png;base64,{}", base64_string));
         let mut result = File::create("./templates/result.html")?;
         TEMPLATES.render_to(
             "template.html",
@@ -104,18 +120,59 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
 
         let current_dir = env::current_dir()?;
         let file_path = current_dir.join("templates/result.html");
+        info!("0000");
         let viewport = tab
             .navigate_to(&format!("file:///{}", file_path.display()))?
-            .wait_for_element("table")?
-            .get_box_model()?
-            .margin_viewport();
-        let jpeg_data = tab.capture_screenshot(
-            Page::CaptureScreenshotFormatOption::Png,
-            Some(75),
-            Some(viewport),
+            .wait_for_element("#app")?;
+
+        // .get_box_model()?
+        // .margin_viewport();
+        // let jpeg_data = tab.capture_screenshot(
+        //     Page::CaptureScreenshotFormatOption::Png,
+        //     Some(75),
+        //     Some(viewport),
+        //     true,
+        // )?;
+        info!("1");
+        let result = viewport.call_js_fn(
+            r#"
+                function getIdTwice () {
+                  return html2canvas(document.getElementById('app')).then(function(canvas) {
+                    document.body.appendChild(canvas)
+                    console.log(canvas,231);
+                    let sdf = canvas.toDataURL();
+                    console.log("sdsdfsd",sdf);
+                    return sdf;
+                    });
+                }
+
+        "#,
+            vec![],
             true,
         )?;
-        std::fs::write("result.png", jpeg_data)?;
+        info!("2");
+
+        match result.value {
+            Some(returned_string) => {
+                // dbg!(returned_string);
+                let sdf: &str = returned_string.as_str().unwrap();
+                let sdf = sdf.trim_start_matches("data:image/png;base64,");
+                let decoded_bytes = decode(sdf).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Failed to decode base64: {}", e),
+                    )
+                })?;
+                let mut file = File::create("result.png")?;
+
+                // 写入解码后的字节数据到文件
+                file.write_all(&decoded_bytes)?;
+            }
+            _ => unreachable!(),
+        };
+        info!("3");
+
+        // std::fs::write("result.png", jpeg_data)?;
         // Command::new(r".\printer.exe")
         //     .args(&["result.png"])
         //     .output()
@@ -157,6 +214,7 @@ fn split_info(code: &str) -> TemplateData {
         vender_code: infos[4].to_string(),
         date: infos[5].to_string(),
         box_no: infos[6].to_string(),
+        qr_code: None,
     }
 }
 #[actix_web::main] // or #[tokio::main]
@@ -181,7 +239,7 @@ async fn main() -> std::io::Result<()> {
             .service(get_barcode)
             .wrap(middleware::Logger::default())
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", 9090))?
     .run()
     .await
 }
@@ -212,4 +270,5 @@ struct TemplateData {
     vender_code: String,
     date: String,
     box_no: String,
+    qr_code: Option<String>,
 }
