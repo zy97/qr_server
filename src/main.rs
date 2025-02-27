@@ -4,7 +4,7 @@ use actix_web::{get, middleware, post, web, App, HttpResponse, HttpServer, Respo
 use barcoders::{generators::image::Image, sym::code128::Code128};
 use err::CustomError;
 use headless_chrome::{protocol::cdp::Page, Browser, Tab};
-use image::{ImageFormat, Luma};
+use image::{ImageFormat, ImageReader, Luma};
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -71,6 +71,15 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
         let infos = split_info(&label.qr_code);
         let image = code.render::<Luma<u8>>().build();
         image.save("./templates/qr.png")?;
+        let img = ImageReader::open("./templates/qr.png")?.decode()?;
+
+        // 将图像编码为 PNG 格式的字节数据
+        let mut img_bytes: Vec<u8> = Vec::new();
+        img.write_to(&mut Cursor::new(&mut img_bytes), image::ImageFormat::Png)?;
+
+        // 将字节数据转换为 Base64
+        let base64_string = general_purpose::STANDARD.encode(&img_bytes);
+
         let mut result = File::create("./templates/result.html")?;
         TEMPLATES.render_to(
             "template.html",
