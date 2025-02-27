@@ -17,27 +17,7 @@ use std::{
 use tera::{Context, Tera};
 use tracing::info;
 use tracing_subscriber::{fmt::Layer, layer::SubscriberExt, FmtSubscriber};
-// lazy_static! {
-//     // pub static ref TEMPLATES: Tera = {
-//     //     let mut tera = match Tera::new("templates/**/*.html") {
-//     //         Ok(t) => t,
-//     //         Err(e) => {
-//     //             println!("Parsing error(s): {}", e);
-//     //             ::std::process::exit(1);
-//     //         }
-//     //     };
-//     //     tera.autoescape_on(vec![".html", ".sql"]);
-//     //     tera
-//     // };
-//     pub static ref BROWSER: Browser = {
-//         let browser: Browser = Browser::default().unwrap();
-//         browser
-//     };
-//     pub static ref CTAB: Arc<Tab> = {
-//         let tab = BROWSER.new_tab().unwrap();
-//         tab
-//     };
-// }
+
 static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
     let mut tera = match Tera::new("templates/**/*.html") {
         Ok(t) => t,
@@ -58,10 +38,6 @@ static CTAB: LazyLock<Arc<Tab>> = LazyLock::new(|| {
     tab
 });
 
-#[get("/hello/{name}")]
-async fn greet(name: web::Path<String>) -> Result<impl Responder, CustomError> {
-    Ok(format!("Hello {name}!"))
-}
 #[get("/qr/{qr_code}")]
 async fn get_qr_code(qr_code: web::Path<String>) -> Result<impl Responder, CustomError> {
     let code = QrCode::new(qr_code.as_bytes())?;
@@ -104,17 +80,21 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
 
         let current_dir = env::current_dir()?;
         let file_path = current_dir.join("templates/result.html");
+        info!("11111");
         let viewport = tab
             .navigate_to(&format!("file:///{}", file_path.display()))?
             .wait_for_element("table")?
             .get_box_model()?
             .margin_viewport();
+        info!("22222");
         let jpeg_data = tab.capture_screenshot(
             Page::CaptureScreenshotFormatOption::Png,
             Some(75),
             Some(viewport),
             true,
         )?;
+        info!("33333");
+
         std::fs::write("result.png", jpeg_data)?;
         // Command::new(r".\printer.exe")
         //     .args(&["result.png"])
@@ -123,29 +103,6 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
     }
     Ok(NamedFile::open("result.png")?)
 }
-
-// #[post("/label")]
-// async fn create_label11(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
-//     // create a `Browser` that spawns a `chromium` process running with UI (`with_head()`, headless is default)
-//     // and the handler that drives the websocket etc.
-//     let (mut browser, mut handler) =
-//         Browser::launch(BrowserConfig::builder().with_head().build().unwrap())
-//             .await
-//             .unwrap();
-
-//     // spawn a new task that continuously polls the handler
-//     let handle = async_std::task::spawn(async move {
-//         while let Some(h) = handler.next().await {
-//             if h.is_err() {
-//                 break;
-//             }
-//         }
-//     });
-
-//     // create a new browser page and navigate to the url
-//     let page = browser.new_page("https://en.wikipedia.org").await.unwrap();
-//     Ok(format!("Hello !"))
-// }
 
 fn split_info(code: &str) -> TemplateData {
     let infos = code.split('|').collect::<Vec<&str>>();
@@ -175,7 +132,6 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(|| {
         App::new()
-            .service(greet)
             .service(get_qr_code)
             .service(create_label)
             .service(get_barcode)
