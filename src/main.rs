@@ -2,21 +2,30 @@ pub mod err;
 use actix_files::NamedFile;
 use actix_web::{get, middleware, post, web, App, HttpResponse, HttpServer, Responder};
 use barcoders::{generators::image::Image, sym::code128::Code128};
+use base64::encode;
 use err::CustomError;
-use headless_chrome::{protocol::cdp::Page, Browser, Tab};
+use headless_chrome::{
+    browser::default_executable, protocol::cdp::Page, Browser, LaunchOptions, Tab,
+};
 use image::{ImageFormat, ImageReader, Luma};
+use named_pipe::{PipeOptions, PipeServer};
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
+    ffi::OsStr,
+    fmt::Display,
     fs::File,
     io::{self, Cursor},
+    os::windows::thread,
     process::Command,
     sync::{Arc, LazyLock},
+    thread::sleep,
+    time::{Duration, Instant},
 };
 use tera::{Context, Tera};
 use tracing::info;
-use tracing_subscriber::{fmt::Layer, layer::SubscriberExt, FmtSubscriber};
+use tracing_subscriber::{field::display, fmt::Layer, layer::SubscriberExt, FmtSubscriber};
 
 static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
     let mut tera = match Tera::new("templates/**/*.html") {
@@ -30,7 +39,17 @@ static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
     tera
 });
 static BROWSER: LazyLock<Browser> = LazyLock::new(|| {
-    let browser: Browser = Browser::default().unwrap();
+    // let browser: Browser = Browser::default().unwrap();
+    let launch_options = LaunchOptions::default_builder()
+        .path(Some(default_executable().map_err(|e| e).unwrap()))
+        .build()
+        .unwrap();
+    let browser = Browser::new(LaunchOptions {
+        headless: true,
+        args: vec![&OsStr::new("--disable-gpu")],
+        ..launch_options
+    })
+    .unwrap();
     browser
 });
 static CTAB: LazyLock<Arc<Tab>> = LazyLock::new(|| {
@@ -68,17 +87,17 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
     let tab = CTAB.clone();
     for label in labels.0 {
         let code = QrCode::new(&label.qr_code)?;
-        let infos = split_info(&label.qr_code);
+        let infos = split_info(&label.qr_code, &label);
         let image = code.render::<Luma<u8>>().build();
         image.save("./templates/qr.png")?;
-        let img = ImageReader::open("./templates/qr.png")?.decode()?;
+        // let img = ImageReader::open("./templates/qr.png")?.decode()?;
 
-        // 将图像编码为 PNG 格式的字节数据
-        let mut img_bytes: Vec<u8> = Vec::new();
-        img.write_to(&mut Cursor::new(&mut img_bytes), image::ImageFormat::Png)?;
+        // // 将图像编码为 PNG 格式的字节数据
+        // let mut img_bytes: Vec<u8> = Vec::new();
+        // img.write_to(&mut Cursor::new(&mut img_bytes), image::ImageFormat::Png)?;
 
-        // 将字节数据转换为 Base64
-        let base64_string = general_purpose::STANDARD.encode(&img_bytes);
+        // // 将字节数据转换为 Base64
+        // let base64_string = general_purpose::STANDARD.encode(&img_bytes);
 
         let mut result = File::create("./templates/result.html")?;
         TEMPLATES.render_to(
@@ -113,7 +132,60 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
     Ok(NamedFile::open("result.png")?)
 }
 
-fn split_info(code: &str) -> TemplateData {
+#[post("/label1")]
+async fn print(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
+    info!("111");
+    for label in labels.0 {
+        let code = QrCode::new(&label.qr_code)?;
+        let mut infos = split_info(&label.qr_code, &label);
+        let image = code.render::<Luma<u8>>().build();
+        // image.save("./templates/qr.png")?;
+        let mut buf = Vec::new();
+        // image.write_to(&mut Cursor::new(&mut buf), image::ImageOutputFormat::Png)?;
+        image.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)?;
+        // // 将字节缓冲区转换为 base64 字符串
+        let base64_string = encode(&buf);
+        infos.base64 = Some(base64_string);
+        info!("222");
+        let json_string = serde_json::to_string(&infos).unwrap();
+        let mut child = Command::new(r".\WpfApp2.exe")
+            .args(&[json_string])
+            .spawn()
+            .map_err(|_| CustomError::PrinterNoFound)?;
+        receive_image_generate_success();
+        info!("333");
+    }
+    Ok(NamedFile::open("result.png")?)
+}
+use std::io::{Read, Write};
+pub fn receive_image_generate_success() -> bool {
+    let pipe_name = r"\\.\pipe\SendResponse";
+    let mut pipe = PipeOptions::new(pipe_name)
+        .single()
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    println!("命名管道已创建，等待客户端连接...");
+
+    let mut buffer = [0u8; 1024];
+    loop {
+        match pipe.read(&mut buffer) {
+            Ok(n) if n > 0 => {
+                let received = String::from_utf8_lossy(&buffer[..n]);
+                println!("收到数据: {}", received);
+                return true;
+            }
+            Ok(_) => break,
+            Err(e) => {
+                eprintln!("读取错误: {}", e);
+                break;
+            }
+        }
+    }
+    false
+}
+fn split_info(code: &str, lable: &LabelInfo) -> TemplateData {
     let infos = code.split('|').collect::<Vec<&str>>();
     TemplateData {
         material_no: infos[0].to_string(),
@@ -123,6 +195,10 @@ fn split_info(code: &str) -> TemplateData {
         vender_code: infos[4].to_string(),
         date: infos[5].to_string(),
         box_no: infos[6].to_string(),
+        customer_name: lable.customer_name.clone(),
+        base64: None,
+        descrpition: lable.commodity.clone(),
+        product_model: lable.product_model.clone(),
     }
 }
 #[actix_web::main] // or #[tokio::main]
@@ -143,6 +219,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .service(get_qr_code)
             .service(create_label)
+            .service(print)
             .service(get_barcode)
             .wrap(middleware::Logger::default())
     })
@@ -168,7 +245,8 @@ struct LabelInfo {
     qr_code: String,
     is_return: bool,
 }
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "PascalCase")]
 struct TemplateData {
     material_no: String,
     lot_no: String,
@@ -177,4 +255,8 @@ struct TemplateData {
     vender_code: String,
     date: String,
     box_no: String,
+    customer_name: String,
+    base64: Option<String>,
+    descrpition: String,
+    product_model: String,
 }
