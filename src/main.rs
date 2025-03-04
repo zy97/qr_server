@@ -152,7 +152,38 @@ async fn print(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, Cust
             .args(&[json_string])
             .spawn()
             .map_err(|_| CustomError::PrinterNoFound)?;
-        receive_image_generate_success();
+        //
+        let timeout = Duration::from_secs(1); // 10秒超时
+        let start_time = Instant::now();
+
+        // 不断检查是否超时
+        loop {
+            if start_time.elapsed() >= timeout {
+                // 如果超时，终止子进程并返回错误
+                break;
+            }
+
+            // 检查子进程是否结束
+            match child.try_wait() {
+                Ok(Some(n)) => {
+                    if n.success() {
+                        info!("正常退出");
+                        break;
+                    } else {
+                        info!("非正常退出");
+                        receive_image_generate_success();
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    // 进程仍在运行，继续等待
+                }
+                Err(_) => {
+                    break;
+                }
+            }
+        }
+
         info!("333");
     }
     Ok(NamedFile::open("result.png")?)
@@ -223,7 +254,7 @@ async fn main() -> std::io::Result<()> {
             .service(get_barcode)
             .wrap(middleware::Logger::default())
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", 9090))?
     .run()
     .await
 }
