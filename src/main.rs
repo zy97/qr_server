@@ -39,86 +39,13 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
             println!("Compile failed.");
         }
         info!("2");
-        // let code = QrCode::new(&label.qr_code)?;
-        // let mut infos = split_info(&label.qr_code);
-        // let image = code.render::<Luma<u8>>().build();
-        // image.save("./templates/qr.png")?;
-        // info!("00");
-        // let img = ImageReader::open("./templates/qr.png")?.decode()?;
 
-        // // 将图像编码为 PNG 格式的字节数据
-        // let mut img_bytes: Vec<u8> = Vec::new();
-        // img.write_to(&mut Cursor::new(&mut img_bytes), image::ImageFormat::Png)?;
-
-        // // 将字节数据转换为 Base64
-        // let base64_string = general_purpose::STANDARD.encode(&img_bytes);
-        // info!("000");
-        // infos.qr_code = Some(format!("data:image/png;base64,{}", base64_string));
-        // let mut result = File::create("./templates/result.html")?;
-        // TEMPLATES.render_to(
-        //     "template.html",
-        //     &Context::from_serialize(&infos)?,
-        //     &mut result,
-        // )?;
-
-        // let current_dir = env::current_dir()?;
-        // let file_path = current_dir.join("templates/result.html");
-        // info!("0000");
-        // let viewport = tab
-        //     .navigate_to(&format!("file:///{}", file_path.display()))?
-        //     .wait_for_element("#app")?;
-
-        // .get_box_model()?
-        // .margin_viewport();
-        // let jpeg_data = tab.capture_screenshot(
-        //     Page::CaptureScreenshotFormatOption::Png,
-        //     Some(75),
-        //     Some(viewport),
-        //     true,
-        // )?;
-
-        // let result = viewport.call_js_fn(
-        //     r#"
-        //         function getIdTwice () {
-        //           return html2canvas(document.getElementById('app')).then(function(canvas) {
-        //             document.body.appendChild(canvas)
-        //             console.log(canvas,231);
-        //             let sdf = canvas.toDataURL();
-        //             console.log("sdsdfsd",sdf);
-        //             return sdf;
-        //             });
-        //         }
-
-        // "#,
-        //     vec![],
-        //     true,
-        // )?;
-
-        // match result.value {
-        //     Some(returned_string) => {
-        //         // dbg!(returned_string);
-        //         let sdf: &str = returned_string.as_str().unwrap();
-        //         let sdf = sdf.trim_start_matches("data:image/png;base64,");
-        //         let decoded_bytes = decode(sdf).map_err(|e| {
-        //             io::Error::new(
-        //                 io::ErrorKind::InvalidData,
-        //                 format!("Failed to decode base64: {}", e),
-        //             )
-        //         })?;
-        //         let mut file = File::create("result.png")?;
-
-        //         // 写入解码后的字节数据到文件
-        //         file.write_all(&decoded_bytes)?;
-        //     }
-        //     _ => unreachable!(),
-        // };
         info!("3");
 
-        // std::fs::write("result.png", jpeg_data)?;
-        // Command::new(r".\printer.exe")
-        //     .args(&["result.png"])
-        //     .output()
-        //     .map_err(|_| CustomError::PrinterNoFound)?;
+        Command::new(r".\printer.exe")
+            .args(&["main.png"])
+            .output()
+            .map_err(|_| CustomError::PrinterNoFound)?;
     }
     Ok(NamedFile::open("main.png")?)
 }
