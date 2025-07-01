@@ -2035,6 +2035,7 @@ dependencies = [
  "image",
  "qrcode",
  "serde",
+ "serde_json",
  "tera",
  "thiserror 2.0.6",
  "tracing",
