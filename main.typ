@@ -22,7 +22,6 @@
 
 #set page(width: 15cm, height: auto)
 #import "@preview/tiaoma:0.3.0"
-
 #table(
   columns: (75pt, 1fr, 50pt, 60pt, 100pt),
   align: center,

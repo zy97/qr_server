@@ -2,6 +2,7 @@ pub mod err;
 use actix_files::NamedFile;
 use actix_web::{get, middleware, post, web, App, HttpServer, Responder};
 use err::CustomError;
+use printers::{common::base::job::PrinterJobOptions, get_printer_by_name};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -40,12 +41,32 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
         }
         info!("2");
 
-        info!("3");
-
-        Command::new(r".\printer.exe")
-            .args(&["main.png"])
-            .output()
-            .map_err(|_| CustomError::PrinterNoFound)?;
+        Command::new("powershell")
+            .args([
+                "-Command",
+                "-NoProfile",
+                "-WindowStyle",
+                "Hidden",
+                "Add-Type -AssemblyName System.Drawing;
+             $pd = New-Object System.Drawing.Printing.PrintDocument;
+             $pd.PrinterSettings.PrinterName = 'NPIFD3D7B (HP LaserJet MFP M233sdw)';
+             $pd.add_PrintPage({
+                 param($s, $e)
+                 $e.Graphics.DrawString(
+                     'Hello World',
+                     (New-Object Drawing.Font('Arial', 20)),
+                     [Drawing.Brushes]::Black,
+                     100, 100
+                 )
+             });
+             $pd.Print();",
+            ])
+            .spawn()
+            .unwrap();
+        // Command::new(r".\printer.exe")
+        //     .args(&["main.png"])
+        //     .output()
+        //     .map_err(|_| CustomError::PrinterNoFound)?;
     }
     Ok(NamedFile::open("main.png")?)
 }
@@ -70,7 +91,7 @@ async fn main() -> std::io::Result<()> {
             .service(create_label)
             .wrap(middleware::Logger::default())
     })
-    .bind(("127.0.0.1", 9090))?
+    .bind(("127.0.0.1", 9095))?
     .run()
     .await
 }

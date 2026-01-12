@@ -1545,9 +1545,9 @@ checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
 
 [[package]]
 name = "libc"
-version = "0.2.168"
+version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aaeb2981e0606ca11d79718f8bb01164f1d6ed75080182d3abf017e6d244b6d"
+checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -1985,6 +1985,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "printers"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2545100430ea007e340a922b4d1457c7202a86e15e182aa0f2f54eba214a8660"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2033,6 +2042,7 @@ dependencies = [
  "criterion",
  "headless_chrome",
  "image",
+ "printers",
  "qrcode",
  "serde",
  "serde_json",
