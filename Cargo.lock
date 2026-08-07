@@ -2079,15 +2079,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "printers"
-version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2545100430ea007e340a922b4d1457c7202a86e15e182aa0f2f54eba214a8660"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2137,7 +2128,6 @@ dependencies = [
  "headless_chrome",
  "image",
  "named_pipe",
- "printers",
  "qrcode",
  "serde",
  "serde_json",

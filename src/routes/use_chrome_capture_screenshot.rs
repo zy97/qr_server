@@ -1,7 +1,7 @@
 use actix_files::NamedFile;
 use actix_web::{get, post, web, HttpResponse, Responder};
 use barcoders::{generators::image::Image, sym::code128::Code128};
-use base64::encode;
+use base64::{engine::general_purpose, Engine};
 use headless_chrome::{
     browser::default_executable, protocol::cdp::Page, Browser, LaunchOptions, Tab,
 };
@@ -46,13 +46,10 @@ static BROWSER: LazyLock<Browser> = LazyLock::new(|| {
 static CTAB: LazyLock<Arc<Tab>> = LazyLock::new(|| BROWSER.new_tab().unwrap());
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("/chrome")
-            .service(get_qr_code)
-            .service(get_barcode)
-            .service(create_label)
-            .service(print),
-    );
+    cfg.service(get_qr_code)
+        .service(get_barcode)
+        .service(create_label)
+        .service(print);
 }
 
 #[get("/qr/{qr_code}")]
@@ -126,7 +123,7 @@ async fn print(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, Cust
         let mut buf = Vec::new();
         image.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)?;
 
-        infos.base64 = Some(encode(&buf));
+        infos.base64 = Some(general_purpose::STANDARD.encode(&buf));
         info!("222");
         let json_string = serde_json::to_string(&infos).unwrap();
         let mut child = Command::new(r".\WpfApp2.exe")

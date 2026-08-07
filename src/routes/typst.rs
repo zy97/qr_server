@@ -11,7 +11,7 @@ use tracing::info;
 use crate::err::CustomError;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(web::scope("/typst").service(greet).service(create_label));
+    cfg.service(greet).service(create_label);
 }
 
 #[get("/hello/{name}")]
@@ -22,7 +22,7 @@ async fn greet(name: web::Path<String>) -> Result<impl Responder, CustomError> {
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
     info!("0");
-    // 整个图片渲染时间大致在200ms附近跳动
+    // 整个图片渲染时间大致在300-400ms附近跳动
     for label in labels.0 {
         let json = serde_json::to_string_pretty(&label).expect("Failed to serialize");
         let mut file = File::create("data.json")?;

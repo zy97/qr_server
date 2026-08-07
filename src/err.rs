@@ -1,5 +1,7 @@
 use actix_web::{HttpResponse, ResponseError};
+#[cfg(any(feature = "master", feature = "chrome"))]
 use image::ImageError;
+#[cfg(any(feature = "master", feature = "chrome"))]
 use qrcode::types::QrError;
 use thiserror::Error;
 use tracing::info;
@@ -8,16 +10,21 @@ use tracing::info;
 pub enum CustomError {
     #[error("OtherLibraryError: {0}")]
     OtherLibraryError(String),
+    #[cfg(any(feature = "master", feature = "chrome"))]
     #[error("QrError: {0}")]
     QrError(#[from] QrError),
+    #[cfg(any(feature = "master", feature = "chrome"))]
     #[error("ImageError: {0}")]
     ImageError(#[from] ImageError),
     #[error("IOError: {0}")]
     IOError(#[from] std::io::Error),
+    #[cfg(any(feature = "master", feature = "chrome"))]
     #[error("TeraError: {0}")]
     TeraError(#[from] tera::Error),
+    #[cfg(any(feature = "master", feature = "chrome"))]
     #[error("AnyhowError: {0}")]
     AnyhowError(#[from] anyhow::Error),
+    #[cfg(feature = "chrome")]
     #[error("打印程序未找到！")]
     PrinterNoFound,
 }
@@ -25,6 +32,7 @@ impl ResponseError for CustomError {
     fn error_response(&self) -> HttpResponse {
         match self {
             CustomError::OtherLibraryError(msg) => HttpResponse::InternalServerError().json(msg),
+            #[cfg(any(feature = "master", feature = "chrome"))]
             CustomError::QrError(_) => HttpResponse::BadRequest().finish(),
             _ => {
                 info!("{}", self);

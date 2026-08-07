@@ -26,13 +26,10 @@ static BROWSER: LazyLock<Browser> = LazyLock::new(|| Browser::default().unwrap()
 static CTAB: LazyLock<Arc<Tab>> = LazyLock::new(|| BROWSER.new_tab().unwrap());
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("/master")
-            .service(greet)
-            .service(get_qr_code)
-            .service(get_barcode)
-            .service(create_label),
-    );
+    cfg.service(greet)
+        .service(get_qr_code)
+        .service(get_barcode)
+        .service(create_label);
 }
 
 #[get("/hello/{name}")]
