@@ -1,10 +1,10 @@
 use actix_files::NamedFile;
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{post, web, Responder};
 use base64::{engine::general_purpose, Engine};
 use headless_chrome::{Browser, Tab};
 use image::{ImageFormat, ImageReader, Luma};
 use qrcode::QrCode;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     env,
     fs::File,
@@ -15,9 +15,12 @@ use tera::{Context, Tera};
 use tracing::info;
 
 use crate::err::CustomError;
+use crate::requests::dtos::create_lable_dto::LabelInfo;
 
 static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
-    let mut tera = Tera::new("templates/template.html").expect("failed to load master template");
+    let mut tera = Tera::new();
+    tera.add_template_file("templates/template.html", Some("template.html"))
+        .expect("failed to load master template");
     tera.autoescape_on(vec![".html", ".sql"]);
     tera
 });
@@ -26,48 +29,18 @@ static BROWSER: LazyLock<Browser> = LazyLock::new(|| Browser::default().unwrap()
 static CTAB: LazyLock<Arc<Tab>> = LazyLock::new(|| BROWSER.new_tab().unwrap());
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(greet)
-        .service(get_qr_code)
-        .service(get_barcode)
-        .service(create_label);
-}
-
-#[get("/hello/{name}")]
-async fn greet(name: web::Path<String>) -> Result<impl Responder, CustomError> {
-    Ok(format!("Hello {name}!"))
-}
-
-#[get("/qr/{qr_code}")]
-async fn get_qr_code(qr_code: web::Path<String>) -> Result<impl Responder, CustomError> {
-    let code = QrCode::new(qr_code.as_bytes())?;
-    let image = code.render::<Luma<u8>>().build();
-
-    let mut buffer = Cursor::new(Vec::new());
-    image.write_to(&mut buffer, ImageFormat::Png)?;
-    Ok(HttpResponse::Ok()
-        .content_type("image/png")
-        .body(buffer.into_inner()))
-}
-
-#[get("/barcode/{barcode}")]
-async fn get_barcode(barcode: web::Path<String>) -> Result<impl Responder, CustomError> {
-    let barcode = barcoders::sym::code128::Code128::new(format!("\u{00C0}{}", barcode)).unwrap();
-    let png = barcoders::generators::image::Image::png(5);
-    let bytes = png.generate(&barcode.encode()[..]).unwrap();
-
-    Ok(HttpResponse::Ok()
-        .content_type("image/png")
-        .body(Cursor::new(bytes).into_inner()))
+    cfg.service(create_label);
 }
 
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
+    // 整个图片渲染时间大致在800-900ms附近跳动
     info!("0");
     let tab = CTAB.clone();
 
     for label in labels.0 {
-        let code = QrCode::new(&label.qr_code)?;
-        let mut infos = split_info(&label.qr_code);
+        let code = QrCode::new(&label.qr_string)?;
+        let mut infos = split_info(&label.qr_string);
         let image = code.render::<Luma<u8>>().build();
         image.save("templates/qr.png")?;
         info!("00");
@@ -138,18 +111,6 @@ fn split_info(code: &str) -> TemplateData {
         box_no: infos[6].to_string(),
         qr_code: None,
     }
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "PascalCase")]
-struct LabelInfo {
-    kind: i32,
-    order_no: String,
-    customer_name: String,
-    product_model: String,
-    commodity: String,
-    qr_code: String,
-    is_return: bool,
 }
 
 #[derive(Serialize)]

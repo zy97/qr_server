@@ -1,6 +1,5 @@
 use actix_files::NamedFile;
-use actix_web::{get, post, web, Responder};
-use serde::{Deserialize, Serialize};
+use actix_web::{post, web, Responder};
 use std::{
     fs::File,
     io::Write,
@@ -9,6 +8,7 @@ use std::{
 use tracing::info;
 
 use crate::err::CustomError;
+use crate::requests::dtos::create_lable_dto::LabelInfo;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
@@ -66,14 +66,4 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
     }
 
     Ok(NamedFile::open("main.png")?)
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-struct LabelInfo {
-    kind: i32,
-    customer_name: String,
-    part_no: String,
-    material_name: String,
-    qr_string: String,
-    is_return: bool,
 }
