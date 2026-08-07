@@ -4,7 +4,7 @@ name = "qr_service"
 version = "0.1.0"
 
 [features]
-default = ["chrome"]
+default = ["agent-browser"]
 master = [
     "dep:anyhow",
     "dep:base64",
@@ -26,7 +26,6 @@ chrome = [
     "dep:tera",
 ]
 agent-browser = [
-    "dep:actix-files",
     "dep:base64",
     "dep:image",
     "dep:qrcode",

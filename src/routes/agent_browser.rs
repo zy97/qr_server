@@ -1,10 +1,16 @@
-use actix_files::NamedFile;
-use actix_web::{post, web, Responder};
+use actix_web::{post, web, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine};
-use image::{ImageFormat, ImageReader, Luma};
+use image::{DynamicImage, ImageFormat, Luma};
 use qrcode::QrCode;
 use serde::Serialize;
-use std::{env, fs, io::Cursor, process::Command, sync::LazyLock};
+use std::{
+    env, fs,
+    io::Cursor,
+    path::PathBuf,
+    process::{self, Command},
+    sync::LazyLock,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tera::{Context, Tera};
 use tracing::info;
 
@@ -30,38 +36,31 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
     // 整个图片渲染时间大致在200-300ms附近跳动
     let current_dir = env::current_dir()?;
-    let agent_browser_dir = current_dir.join("templates/agent-browser");
-    fs::create_dir_all(&agent_browser_dir)?;
-    let template_path = agent_browser_dir.join("result.html");
-    let qr_path = agent_browser_dir.join("qr.png");
-    let output_path = current_dir.join("agent_browser_result.png");
     let agent_browser_path = current_dir.join("agent-browser.exe");
+    let agent_browser_dir = agent_browser_path
+        .parent()
+        .ok_or_else(|| CustomError::OtherLibraryError("invalid agent-browser path".to_string()))?;
+    let mut result_image = None;
 
     for label in labels.0 {
-        let code = QrCode::new(&label.qr_string)?;
         let mut infos = split_info(&label.qr_string);
-        let image = code.render::<Luma<u8>>().build();
-        image.save(&qr_path)?;
-
-        let img = ImageReader::open(&qr_path)?.decode()?;
-        let mut img_bytes = Vec::new();
-        img.write_to(&mut Cursor::new(&mut img_bytes), ImageFormat::Png)?;
-        let base64_string = general_purpose::STANDARD.encode(&img_bytes);
-        infos.qr_code = Some(format!("data:image/png;base64,{}", base64_string));
+        infos.qr_code = Some(qr_code_data_uri(&label.qr_string)?);
 
         let rendered = TEMPLATES.render("template.html", &Context::from_serialize(&infos)?)?;
-        fs::write(&template_path, rendered)?;
+        let output_path = TempScreenshot::new(agent_browser_dir)?;
 
         let status = Command::new(&agent_browser_path)
             .arg("--session")
             .arg("qr-service-agent-browser")
-            .arg("--allow-file-access")
             .arg("batch")
             .arg("--bail")
             .arg("set viewport 1200 800")
-            .arg(format!("open {}", file_url(&template_path)))
+            .arg(format!("open {}", html_data_url(&rendered)))
             .arg("wait #app")
-            .arg(format!("screenshot #app {}", command_path(&output_path)))
+            .arg(format!(
+                "screenshot #app {}",
+                command_path(output_path.path())
+            ))
             .status()
             .map_err(|error| {
                 CustomError::OtherLibraryError(format!(
@@ -72,19 +71,21 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
 
         if !status.success() {
             return Err(CustomError::OtherLibraryError(format!(
-                "agent-browser failed to render {} with status {status}",
-                template_path.display()
+                "agent-browser failed to render label with status {status}"
             )));
         }
 
-        info!("agent-browser rendered {}", output_path.display());
+        let image_data = fs::read(output_path.path())?;
+        info!("agent-browser rendered {}", output_path.path().display());
+        result_image = Some(image_data);
     }
 
-    Ok(NamedFile::open(output_path)?)
-}
+    let result_image = result_image
+        .ok_or_else(|| CustomError::OtherLibraryError("no label data provided".to_string()))?;
 
-fn file_url(path: &std::path::Path) -> String {
-    format!("file:///{}", command_path(path))
+    Ok(HttpResponse::Ok()
+        .content_type("image/png")
+        .body(result_image))
 }
 
 fn command_path(path: &std::path::Path) -> String {
@@ -102,6 +103,57 @@ fn split_info(code: &str) -> TemplateData {
         date: infos[5].to_string(),
         box_no: infos[6].to_string(),
         qr_code: None,
+    }
+}
+
+fn qr_code_data_uri(content: &str) -> Result<String, CustomError> {
+    let image = DynamicImage::ImageLuma8(QrCode::new(content)?.render::<Luma<u8>>().build());
+    let mut png_bytes = Vec::new();
+    image.write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png)?;
+
+    Ok(format!(
+        "data:image/png;base64,{}",
+        general_purpose::STANDARD.encode(png_bytes)
+    ))
+}
+
+fn html_data_url(html: &str) -> String {
+    format!(
+        "data:text/html;base64,{}",
+        general_purpose::STANDARD.encode(html)
+    )
+}
+
+struct TempScreenshot {
+    path: PathBuf,
+}
+
+impl TempScreenshot {
+    fn new(base_dir: &std::path::Path) -> Result<Self, CustomError> {
+        let temp_dir = base_dir.join("temp");
+        fs::create_dir_all(&temp_dir)?;
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let path = temp_dir.join(format!(
+            "qr_service_agent_browser_{}_{}.png",
+            process::id(),
+            timestamp
+        ));
+
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for TempScreenshot {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
     }
 }
 
@@ -129,5 +181,62 @@ mod tests {
         TEMPLATES
             .render("template.html", &context)
             .expect("agent-browser template should render with master template data");
+    }
+
+    #[test]
+    fn encodes_rendered_template_as_html_data_url() {
+        let data_url = html_data_url("<table id=\"app\"></table>");
+        let encoded = data_url
+            .strip_prefix("data:text/html;base64,")
+            .expect("template should use an HTML data URL");
+        let decoded = general_purpose::STANDARD
+            .decode(encoded)
+            .expect("data URL should contain Base64 data");
+
+        assert_eq!(decoded, b"<table id=\"app\"></table>");
+    }
+
+    #[test]
+    fn encodes_qr_code_as_png_data_uri_without_a_file() {
+        let data_uri = qr_code_data_uri("M001|L001|O001|10|V001|2026-08-07|B001")
+            .expect("QR code should encode");
+        let encoded = data_uri
+            .strip_prefix("data:image/png;base64,")
+            .expect("QR code should use a PNG data URI");
+        let png_bytes = general_purpose::STANDARD
+            .decode(encoded)
+            .expect("data URI should contain Base64 data");
+
+        assert_eq!(&png_bytes[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn renders_template_without_relative_qr_file() {
+        let mut template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001");
+        template_data.qr_code = Some(qr_code_data_uri("M001").expect("encode QR code"));
+        let rendered = TEMPLATES
+            .render(
+                "template.html",
+                &Context::from_serialize(&template_data).expect("serialize template data"),
+            )
+            .expect("agent-browser template should render");
+
+        assert!(!rendered.contains("<img src=\"./qr.png\" height=\"150\" />"));
+        assert!(rendered.contains("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn stores_temp_screenshot_next_to_the_executable_directory() {
+        let temp_screenshot =
+            TempScreenshot::new(std::path::Path::new("C:/code-github/qr_service"))
+                .expect("create temp screenshot path");
+
+        assert_eq!(
+            temp_screenshot
+                .path()
+                .parent()
+                .expect("screenshot path should have a parent"),
+            std::path::Path::new("C:/code-github/qr_service/temp")
+        );
     }
 }
