@@ -4,7 +4,7 @@ name = "qr_service"
 version = "0.1.0"
 
 [features]
-default = ["agent-browser"]
+default = ["chrome"]
 master = [
     "dep:anyhow",
     "dep:base64",

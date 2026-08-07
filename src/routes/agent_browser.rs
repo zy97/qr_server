@@ -9,7 +9,7 @@ use std::{
     path::PathBuf,
     process::{self, Command},
     sync::LazyLock,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tera::{Context, Tera};
 use tracing::info;
@@ -35,6 +35,9 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
     // 整个图片渲染时间大致在200-300ms附近跳动
+    let request_started = Instant::now();
+    let labels = labels.into_inner();
+    let label_count = labels.len();
     let current_dir = env::current_dir()?;
     let agent_browser_path = current_dir.join("agent-browser.exe");
     let agent_browser_dir = agent_browser_path
@@ -42,13 +45,19 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
         .ok_or_else(|| CustomError::OtherLibraryError("invalid agent-browser path".to_string()))?;
     let mut result_image = None;
 
-    for label in labels.0 {
+    for label in labels {
+        let render_started = Instant::now();
         let mut infos = split_info(&label.qr_string);
         infos.qr_code = Some(qr_code_data_uri(&label.qr_string)?);
 
         let rendered = TEMPLATES.render("template.html", &Context::from_serialize(&infos)?)?;
+        info!(
+            elapsed_ms = render_started.elapsed().as_millis(),
+            "agent-browser template rendered"
+        );
         let output_path = TempScreenshot::new(agent_browser_dir)?;
 
+        let browser_started = Instant::now();
         let status = Command::new(&agent_browser_path)
             .arg("--session")
             .arg("qr-service-agent-browser")
@@ -68,6 +77,10 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
                     agent_browser_path.display()
                 ))
             })?;
+        info!(
+            elapsed_ms = browser_started.elapsed().as_millis(),
+            "agent-browser command finished"
+        );
 
         if !status.success() {
             return Err(CustomError::OtherLibraryError(format!(
@@ -75,13 +88,22 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
             )));
         }
 
+        let read_started = Instant::now();
         let image_data = fs::read(output_path.path())?;
+        info!(
+            elapsed_ms = read_started.elapsed().as_millis(),
+            "agent-browser screenshot read"
+        );
         info!("agent-browser rendered {}", output_path.path().display());
         result_image = Some(image_data);
     }
 
     let result_image = result_image
         .ok_or_else(|| CustomError::OtherLibraryError("no label data provided".to_string()))?;
+    info!(
+        elapsed_ms = request_started.elapsed().as_millis(),
+        label_count, "agent-browser label response finished"
+    );
 
     Ok(HttpResponse::Ok()
         .content_type("image/png")
