@@ -11,12 +11,7 @@ use tracing::info;
 use crate::err::CustomError;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(greet).service(create_label);
-}
-
-#[get("/hello/{name}")]
-async fn greet(name: web::Path<String>) -> Result<impl Responder, CustomError> {
-    Ok(format!("Hello {name}!"))
+    cfg.service(create_label);
 }
 
 #[post("/label")]
