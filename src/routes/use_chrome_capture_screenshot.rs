@@ -1,19 +1,17 @@
-use actix_files::NamedFile;
-use actix_web::{post, web, Responder};
+use actix_web::{post, web, HttpResponse, Responder};
+use base64::{engine::general_purpose, Engine};
 use headless_chrome::{
     browser::default_executable, protocol::cdp::Page, Browser, LaunchOptions, Tab,
 };
-use image::Luma;
+use image::{DynamicImage, ImageFormat, Luma};
 use qrcode::QrCode;
 use serde::Serialize;
 use std::{
-    env,
     ffi::OsStr,
-    fs::File,
-    sync::{Arc, LazyLock},
+    io::Cursor,
+    sync::{Arc, LazyLock, Mutex},
 };
 use tera::{Context, Tera};
-use tracing::info;
 
 use crate::err::CustomError;
 use crate::requests::dtos::create_lable_dto::LabelInfo;
@@ -39,7 +37,7 @@ static BROWSER: LazyLock<Browser> = LazyLock::new(|| {
     .unwrap()
 });
 
-static CTAB: LazyLock<Arc<Tab>> = LazyLock::new(|| BROWSER.new_tab().unwrap());
+static CTAB: LazyLock<Mutex<Arc<Tab>>> = LazyLock::new(|| Mutex::new(BROWSER.new_tab().unwrap()));
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
@@ -48,40 +46,38 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
     // 整个图片渲染时间大致在600-700ms附近跳动
-    let tab = CTAB.clone();
+    let tab = CTAB
+        .lock()
+        .map_err(|_| CustomError::OtherLibraryError("chrome tab lock poisoned".into()))?;
+    let mut result_image = None;
+
     for label in labels.0 {
-        let code = QrCode::new(&label.qr_string)?;
-        let infos = split_info(&label.qr_string, &label);
-        let image = code.render::<Luma<u8>>().build();
-        image.save("templates/chrome/qr.png")?;
+        let mut infos = split_info(&label.qr_string, &label);
+        infos.base64 = Some(qr_code_data_uri(&label.qr_string)?);
+        infos.logo_base64 = Some(file_data_uri("templates/logo.png", "image/png")?);
 
-        let mut result = File::create("templates/chrome/result.html")?;
-        TEMPLATES.render_to(
-            "template.html",
-            &Context::from_serialize(&infos)?,
-            &mut result,
-        )?;
-
-        let file_path = env::current_dir()?.join("templates/chrome/result.html");
-        info!("11111");
+        let rendered = TEMPLATES.render("template.html", &Context::from_serialize(&infos)?)?;
         let viewport = tab
-            .navigate_to(&format!("file:///{}", file_path.display()))?
+            .navigate_to(&html_data_url(&rendered))?
             .wait_for_element("table")?
             .get_box_model()?
-            .margin_viewport();
-        info!("22222");
+            .content_viewport();
         let image_data = tab.capture_screenshot(
             Page::CaptureScreenshotFormatOption::Png,
             Some(75),
             Some(viewport),
             true,
         )?;
-        info!("33333");
 
-        std::fs::write("chrome_result.png", image_data)?;
+        result_image = Some(image_data);
     }
 
-    Ok(NamedFile::open("chrome_result.png")?)
+    let result_image = result_image
+        .ok_or_else(|| CustomError::OtherLibraryError("no label data provided".to_string()))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("image/png")
+        .body(result_image))
 }
 
 fn split_info(code: &str, label: &LabelInfo) -> TemplateData {
@@ -96,9 +92,36 @@ fn split_info(code: &str, label: &LabelInfo) -> TemplateData {
         box_no: infos[6].to_string(),
         customer_name: label.customer_name.clone(),
         base64: None,
+        logo_base64: None,
         descrpition: label.material_name.clone(),
         product_model: label.part_no.clone(),
     }
+}
+
+fn qr_code_data_uri(content: &str) -> Result<String, CustomError> {
+    let image = DynamicImage::ImageLuma8(QrCode::new(content)?.render::<Luma<u8>>().build());
+    let mut png_bytes = Vec::new();
+    image.write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png)?;
+
+    Ok(format!(
+        "data:image/png;base64,{}",
+        general_purpose::STANDARD.encode(png_bytes)
+    ))
+}
+
+fn file_data_uri(path: &str, content_type: &str) -> Result<String, CustomError> {
+    let bytes = std::fs::read(path)?;
+    Ok(format!(
+        "data:{content_type};base64,{}",
+        general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+fn html_data_url(html: &str) -> String {
+    format!(
+        "data:text/html;base64,{}",
+        general_purpose::STANDARD.encode(html)
+    )
 }
 
 #[derive(Serialize, Debug)]
@@ -113,6 +136,7 @@ struct TemplateData {
     box_no: String,
     customer_name: String,
     base64: Option<String>,
+    logo_base64: Option<String>,
     descrpition: String,
     product_model: String,
 }
@@ -137,5 +161,57 @@ mod tests {
         TEMPLATES
             .render("template.html", &context)
             .expect("chrome template should render with chrome template data");
+    }
+
+    #[test]
+    fn renders_template_without_relative_image_files() {
+        let label = LabelInfo {
+            kind: 1,
+            customer_name: "客户".to_string(),
+            part_no: "P-001".to_string(),
+            material_name: "物料".to_string(),
+            qr_string: "M001|L001|O001|10|V001|2026-08-07|B001".to_string(),
+            is_return: false,
+        };
+        let mut template_data = split_info(&label.qr_string, &label);
+        template_data.base64 = Some(qr_code_data_uri(&label.qr_string).expect("encode QR code"));
+        template_data.logo_base64 = Some("data:image/png;base64,logo".to_string());
+        let rendered = TEMPLATES
+            .render(
+                "template.html",
+                &Context::from_serialize(&template_data).expect("serialize template data"),
+            )
+            .expect("chrome template should render");
+
+        assert!(!rendered.contains("../logo.png"));
+        assert!(!rendered.contains("./qr.png"));
+        assert!(rendered.contains("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn encodes_rendered_template_as_html_data_url() {
+        let data_url = html_data_url("<table></table>");
+        let encoded = data_url
+            .strip_prefix("data:text/html;base64,")
+            .expect("template should use an HTML data URL");
+        let decoded = general_purpose::STANDARD
+            .decode(encoded)
+            .expect("data URL should contain Base64 data");
+
+        assert_eq!(decoded, b"<table></table>");
+    }
+
+    #[test]
+    fn encodes_qr_code_as_png_data_uri_without_a_file() {
+        let data_uri = qr_code_data_uri("M001|L001|O001|10|V001|2026-08-07|B001")
+            .expect("QR code should encode");
+        let encoded = data_uri
+            .strip_prefix("data:image/png;base64,")
+            .expect("QR code should use a PNG data URI");
+        let png_bytes = general_purpose::STANDARD
+            .decode(encoded)
+            .expect("data URI should contain Base64 data");
+
+        assert_eq!(&png_bytes[..8], b"\x89PNG\r\n\x1a\n");
     }
 }
