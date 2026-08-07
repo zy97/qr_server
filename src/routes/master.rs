@@ -8,7 +8,7 @@ use std::{
     ffi::OsStr,
     io::Cursor,
     sync::{Arc, LazyLock, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tera::{Context, Tera};
 use tracing::info;
@@ -16,8 +16,8 @@ use tracing::info;
 use crate::err::CustomError;
 use crate::requests::dtos::create_lable_dto::LabelInfo;
 
-const BROWSER_WINDOW_WIDTH: u32 = 1200;
-const BROWSER_WINDOW_HEIGHT: u32 = 800;
+const BROWSER_WINDOW_WIDTH: u32 = 800;
+const BROWSER_WINDOW_HEIGHT: u32 = 500;
 
 static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
     let mut tera = Tera::new();
@@ -31,10 +31,16 @@ static BROWSER: LazyLock<Browser> = LazyLock::new(|| {
     let started = Instant::now();
     let launch_options = LaunchOptions::default_builder()
         .window_size(Some((BROWSER_WINDOW_WIDTH, BROWSER_WINDOW_HEIGHT)))
+        .idle_browser_timeout(Duration::from_secs(86_400))
         .build()
         .unwrap();
     let browser = Browser::new(LaunchOptions {
-        args: vec![OsStr::new("--force-device-scale-factor=1")],
+        args: vec![
+            OsStr::new("--force-device-scale-factor=1"),
+            OsStr::new("--disable-background-timer-throttling"),
+            OsStr::new("--disable-renderer-backgrounding"),
+            OsStr::new("--disable-backgrounding-occluded-windows"),
+        ],
         ..launch_options
     })
     .unwrap();
@@ -196,7 +202,7 @@ fn label_ready_script() -> &'static str {
                 }
                 done = true;
                 clearTimeout(fallback);
-                requestAnimationFrame(() => requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
                     const app = document.querySelector("#app") || document.querySelector("table");
                     if (!app) {
                         resolve("0,0,1,1");
@@ -204,7 +210,7 @@ fn label_ready_script() -> &'static str {
                     }
                     const rect = app.getBoundingClientRect();
                     resolve(`${rect.left},${rect.top},${rect.width},${rect.height}`);
-                }));
+                });
             };
 
             if (ready()) {
