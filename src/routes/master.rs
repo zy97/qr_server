@@ -1,5 +1,4 @@
-use actix_files::NamedFile;
-use actix_web::{post, web, Responder};
+use actix_web::{post, web, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine};
 use headless_chrome::{protocol::cdp::Page, Browser, Tab};
 use image::{DynamicImage, ImageFormat, Luma};
@@ -7,10 +6,9 @@ use qrcode::QrCode;
 use serde::Serialize;
 use std::{
     io::Cursor,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, Mutex},
 };
 use tera::{Context, Tera};
-use tracing::info;
 
 use crate::err::CustomError;
 use crate::requests::dtos::create_lable_dto::LabelInfo;
@@ -24,7 +22,7 @@ static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
 });
 
 static BROWSER: LazyLock<Browser> = LazyLock::new(|| Browser::default().unwrap());
-static CTAB: LazyLock<Arc<Tab>> = LazyLock::new(|| BROWSER.new_tab().unwrap());
+static CTAB: LazyLock<Mutex<Arc<Tab>>> = LazyLock::new(|| Mutex::new(BROWSER.new_tab().unwrap()));
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
@@ -33,22 +31,37 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
     // 整个图片渲染时间大致在800-900ms附近跳动
-    let tab = CTAB.clone();
+    let tab = CTAB
+        .lock()
+        .map_err(|_| CustomError::OtherLibraryError("master chrome tab lock poisoned".into()))?;
+    let mut result_image = None;
 
     for label in labels.0 {
         let mut infos = split_info(&label.qr_string);
         infos.qr_code = Some(qr_code_data_uri(&label.qr_string)?);
 
         let rendered = TEMPLATES.render("template.html", &Context::from_serialize(&infos)?)?;
-        let image_data = tab
+        let viewport = tab
             .navigate_to(&html_data_url(&rendered))?
             .wait_for_element("#app")?
-            .capture_screenshot(Page::CaptureScreenshotFormatOption::Png)?;
+            .get_box_model()?
+            .content_viewport();
+        let image_data = tab.capture_screenshot(
+            Page::CaptureScreenshotFormatOption::Png,
+            Some(75),
+            Some(viewport),
+            true,
+        )?;
 
-        std::fs::write("result.png", image_data)?;
+        result_image = Some(image_data);
     }
 
-    Ok(NamedFile::open("result.png")?)
+    let result_image = result_image
+        .ok_or_else(|| CustomError::OtherLibraryError("no label data provided".to_string()))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("image/png")
+        .body(result_image))
 }
 
 fn split_info(code: &str) -> TemplateData {
