@@ -3,7 +3,7 @@ use actix_web::{post, web, Responder};
 use headless_chrome::{
     browser::default_executable, protocol::cdp::Page, Browser, LaunchOptions, Tab,
 };
-use image::{ Luma};
+use image::Luma;
 use qrcode::QrCode;
 use serde::Serialize;
 use std::{

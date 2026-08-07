@@ -1,4 +1,0 @@
-ESC E            ; 打印机复位
-ESC (s0p12h0s0b0T; 字体：Courier，12pt
-Hello World
-FF               ; 换页（Form Feed）
