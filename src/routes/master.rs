@@ -1,14 +1,12 @@
 use actix_files::NamedFile;
 use actix_web::{post, web, Responder};
 use base64::{engine::general_purpose, Engine};
-use headless_chrome::{Browser, Tab};
-use image::{ImageFormat, ImageReader, Luma};
+use headless_chrome::{protocol::cdp::Page, Browser, Tab};
+use image::{DynamicImage, ImageFormat, Luma};
 use qrcode::QrCode;
 use serde::Serialize;
 use std::{
-    env,
-    fs::File,
-    io::{self, Cursor, Write},
+    io::Cursor,
     sync::{Arc, LazyLock},
 };
 use tera::{Context, Tera};
@@ -35,68 +33,22 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
     // 整个图片渲染时间大致在800-900ms附近跳动
-    info!("0");
     let tab = CTAB.clone();
 
     for label in labels.0 {
-        let code = QrCode::new(&label.qr_string)?;
         let mut infos = split_info(&label.qr_string);
-        let image = code.render::<Luma<u8>>().build();
-        image.save("templates/qr.png")?;
-        info!("00");
+        infos.qr_code = Some(qr_code_data_uri(&label.qr_string)?);
 
-        let img = ImageReader::open("templates/qr.png")?.decode()?;
-        let mut img_bytes = Vec::new();
-        img.write_to(&mut Cursor::new(&mut img_bytes), ImageFormat::Png)?;
-        let base64_string = general_purpose::STANDARD.encode(&img_bytes);
-        infos.qr_code = Some(format!("data:image/png;base64,{}", base64_string));
+        let rendered = TEMPLATES.render("template.html", &Context::from_serialize(&infos)?)?;
+        let image_data = tab
+            .navigate_to(&html_data_url(&rendered))?
+            .wait_for_element("#app")?
+            .capture_screenshot(Page::CaptureScreenshotFormatOption::Png)?;
 
-        let mut result = File::create("templates/result_master.html")?;
-        TEMPLATES.render_to(
-            "template.html",
-            &Context::from_serialize(&infos)?,
-            &mut result,
-        )?;
-
-        let file_path = env::current_dir()?.join("templates/result_master.html");
-        let viewport = tab
-            .navigate_to(&format!("file:///{}", file_path.display()))?
-            .wait_for_element("#app")?;
-
-        let result = viewport.call_js_fn(
-            r#"
-                function getIdTwice () {
-                  return html2canvas(document.getElementById('app')).then(function(canvas) {
-                    return canvas.toDataURL();
-                  });
-                }
-            "#,
-            vec![],
-            true,
-        )?;
-
-        match result.value {
-            Some(returned_string) => {
-                let encoded = returned_string.as_str().unwrap();
-                let encoded = encoded.trim_start_matches("data:image/png;base64,");
-                let decoded_bytes = general_purpose::STANDARD.decode(encoded).map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("Failed to decode base64: {error}"),
-                    )
-                })?;
-                let mut file = File::create("master_result.png")?;
-                file.write_all(&decoded_bytes)?;
-            }
-            None => {
-                return Err(CustomError::OtherLibraryError(
-                    "html2canvas did not return an image".to_string(),
-                ))
-            }
-        }
+        std::fs::write("result.png", image_data)?;
     }
 
-    Ok(NamedFile::open("master_result.png")?)
+    Ok(NamedFile::open("result.png")?)
 }
 
 fn split_info(code: &str) -> TemplateData {
@@ -113,6 +65,24 @@ fn split_info(code: &str) -> TemplateData {
     }
 }
 
+fn qr_code_data_uri(content: &str) -> Result<String, CustomError> {
+    let image = DynamicImage::ImageLuma8(QrCode::new(content)?.render::<Luma<u8>>().build());
+    let mut png_bytes = Vec::new();
+    image.write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png)?;
+
+    Ok(format!(
+        "data:image/png;base64,{}",
+        general_purpose::STANDARD.encode(png_bytes)
+    ))
+}
+
+fn html_data_url(html: &str) -> String {
+    format!(
+        "data:text/html;base64,{}",
+        general_purpose::STANDARD.encode(html)
+    )
+}
+
 #[derive(Serialize)]
 struct TemplateData {
     material_no: String,
@@ -123,4 +93,61 @@ struct TemplateData {
     date: String,
     box_no: String,
     qr_code: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_template_without_html2canvas() {
+        let template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001");
+        let rendered = TEMPLATES
+            .render(
+                "template.html",
+                &Context::from_serialize(&template_data).expect("serialize template data"),
+            )
+            .expect("master template should render");
+
+        assert!(!rendered.contains("html2canvas"));
+    }
+
+    #[test]
+    fn encodes_rendered_template_as_html_data_url() {
+        let template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001");
+        let rendered = TEMPLATES
+            .render(
+                "template.html",
+                &Context::from_serialize(&template_data).expect("serialize template data"),
+            )
+            .expect("master template should render");
+        let data_url = html_data_url(&rendered);
+        let encoded = data_url
+            .strip_prefix("data:text/html;base64,")
+            .expect("template should use an HTML data URL");
+        let decoded = general_purpose::STANDARD
+            .decode(encoded)
+            .expect("data URL should contain Base64 data");
+
+        assert_eq!(decoded, rendered.as_bytes());
+    }
+
+    #[test]
+    fn encodes_qr_code_as_png_data_uri_without_a_file() {
+        let data_uri = qr_code_data_uri("M001|L001|O001|10|V001|2026-08-07|B001")
+            .expect("QR code should encode");
+        let encoded = data_uri
+            .strip_prefix("data:image/png;base64,")
+            .expect("QR code should use a PNG data URI");
+        let png_bytes = general_purpose::STANDARD
+            .decode(encoded)
+            .expect("data URI should contain Base64 data");
+
+        assert_eq!(&png_bytes[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn rejects_qr_code_content_that_exceeds_capacity() {
+        assert!(qr_code_data_uri(&"A".repeat(10_000)).is_err());
+    }
 }

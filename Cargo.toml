@@ -4,7 +4,7 @@ name = "qr_service"
 version = "0.1.0"
 
 [features]
-default = ["typst"]
+default = ["master"]
 master = [
     "dep:actix-files",
     "dep:anyhow",
@@ -35,7 +35,6 @@ agent-browser = [
     "dep:qrcode",
     "dep:tera",
 ]
-
 [dependencies]
 serde_json = { version = "1.0", optional = true }
 actix-files = { version = "0.6", optional = true }
