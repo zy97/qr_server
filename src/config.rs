@@ -10,9 +10,17 @@ pub struct Config {
     pub print: PrintConfig,
 }
 
-/// 缺省打印机名（来自打印原型脚本）
+/// 以下默认值来自原 C# 打印服务的生产配置
 fn default_printer_name() -> String {
-    "NPIFD3D7B (HP LaserJet MFP M233sdw)".to_string()
+    "ZDesigner ZT231-300dpi ZPL".to_string()
+}
+
+fn default_paper_width() -> f64 {
+    10.57
+}
+
+fn default_paper_height() -> f64 {
+    29.70
 }
 
 #[derive(Deserialize)]
@@ -23,6 +31,12 @@ pub struct PrintConfig {
     /// 目标打印机名（Windows 打印机列表中的名称）
     #[serde(default = "default_printer_name")]
     pub printer_name: String,
+    /// 自定义纸张宽度（cm）
+    #[serde(default = "default_paper_width")]
+    pub paper_width: f64,
+    /// 自定义纸张高度（cm）
+    #[serde(default = "default_paper_height")]
+    pub paper_height: f64,
 }
 
 impl Default for PrintConfig {
@@ -30,6 +44,8 @@ impl Default for PrintConfig {
         Self {
             enabled: false,
             printer_name: default_printer_name(),
+            paper_width: default_paper_width(),
+            paper_height: default_paper_height(),
         }
     }
 }
@@ -52,19 +68,22 @@ mod tests {
 
     #[test]
     fn parse_print_config() {
-        let config: Config =
-            toml::from_str("[print]\nenabled = true\nprinter_name = \"Test Printer\"").unwrap();
+        let config: Config = toml::from_str(
+            "[print]\nenabled = true\nprinter_name = \"Test Printer\"\npaper_width = 15.0\npaper_height = 10.0",
+        )
+        .unwrap();
         assert!(config.print.enabled);
         assert_eq!(config.print.printer_name, "Test Printer");
+        assert_eq!(config.print.paper_width, 15.0);
+        assert_eq!(config.print.paper_height, 10.0);
     }
 
     #[test]
-    fn missing_print_section_defaults_to_disabled() {
+    fn missing_print_section_uses_csharp_defaults() {
         let config: Config = toml::from_str("").unwrap();
         assert!(!config.print.enabled);
-        assert_eq!(
-            config.print.printer_name,
-            "NPIFD3D7B (HP LaserJet MFP M233sdw)"
-        );
+        assert_eq!(config.print.printer_name, "ZDesigner ZT231-300dpi ZPL");
+        assert_eq!(config.print.paper_width, 10.57);
+        assert_eq!(config.print.paper_height, 29.70);
     }
 }

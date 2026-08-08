@@ -4,4 +4,9 @@
 # 生成标签图片后是否同时发送到打印机
 enabled = true
 # 目标打印机名（Windows 打印机列表中的名称）
-printer_name = "NPIFD3D7B (HP LaserJet MFP M233sdw)"
+# printer_name = "ZDesigner ZT231-300dpi ZPL"
+printer_name = "Microsoft Print to PDF"
+
+# 自定义纸张尺寸（cm），与原 C# 打印服务一致
+paper_width = 10.57
+paper_height = 29.70
