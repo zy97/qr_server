@@ -107,7 +107,11 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
 
     let mut result_image = None;
     for label in labels {
-        result_image = Some(render_label(&label).await?);
+        let image = render_label(&label).await?;
+        if crate::config::CONFIG.print.enabled {
+            crate::print::print_label_png(&image)?;
+        }
+        result_image = Some(image);
     }
 
     // Command::new("powershell")

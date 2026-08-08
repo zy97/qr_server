@@ -47,6 +47,7 @@ qrcode = { version = "0.14.1", optional = true }
 serde = { version = "1", features = ["derive"] }
 tera = { version = "2.1.0", default-features = false, optional = true }
 thiserror = "2"
+toml = "0.8"
 tokio = { version = "1", features = ["sync", "process", "fs", "io-util", "time", "rt"], optional = true }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"

@@ -102,6 +102,9 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
         );
 
         let image_data = capture_label_screenshot(&rendered).await?;
+        if crate::config::CONFIG.print.enabled {
+            crate::print::print_label_png(&image_data)?;
+        }
         result_image = Some(image_data);
     }
 

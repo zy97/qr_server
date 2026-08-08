@@ -27,7 +27,7 @@ pub enum CustomError {
     #[cfg(any(feature = "master", feature = "chrome"))]
     #[error("AnyhowError: {0}")]
     AnyhowError(#[from] anyhow::Error),
-    #[cfg(feature = "chrome")]
+    #[cfg(any(feature = "master", feature = "typst", feature = "chrome"))]
     #[error("打印程序未找到！")]
     PrinterNoFound,
 }
