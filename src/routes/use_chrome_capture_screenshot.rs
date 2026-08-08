@@ -20,7 +20,7 @@ const BROWSER_WINDOW_HEIGHT: u32 = 500;
 
 static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
     let mut tera = Tera::new();
-    tera.add_template_file("templates/chrome/template.html", Some("template.html"))
+    tera.add_template_file("templates/template.html", Some("template.html"))
         .expect("failed to load chrome template");
     tera.autoescape_on(vec![".html", ".sql"]);
     tera
@@ -92,8 +92,7 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
     for label in labels {
         let render_started = Instant::now();
         let mut infos = split_info(&label.qr_string, &label);
-        infos.base64 = Some(qr_code_data_uri(&label.qr_string)?);
-        infos.logo_base64 = Some(file_data_uri("templates/logo.png", "image/png")?);
+        infos.qr_code = Some(qr_code_data_uri(&label.qr_string)?);
 
         let rendered = TEMPLATES.render("template.html", &Context::from_serialize(&infos)?)?;
         info!(
@@ -296,8 +295,7 @@ fn split_info(code: &str, label: &LabelInfo) -> TemplateData {
         date: infos[5].to_string(),
         box_no: infos[6].to_string(),
         customer_name: label.customer_name.clone(),
-        base64: None,
-        logo_base64: None,
+        qr_code: None,
         descrpition: label.material_name.clone(),
         product_model: label.part_no.clone(),
     }
@@ -311,14 +309,6 @@ fn qr_code_data_uri(content: &str) -> Result<String, CustomError> {
     Ok(format!(
         "data:image/png;base64,{}",
         general_purpose::STANDARD.encode(png_bytes)
-    ))
-}
-
-fn file_data_uri(path: &str, content_type: &str) -> Result<String, CustomError> {
-    let bytes = std::fs::read(path)?;
-    Ok(format!(
-        "data:{content_type};base64,{}",
-        general_purpose::STANDARD.encode(bytes)
     ))
 }
 
@@ -340,8 +330,7 @@ struct TemplateData {
     date: String,
     box_no: String,
     customer_name: String,
-    base64: Option<String>,
-    logo_base64: Option<String>,
+    qr_code: Option<String>,
     descrpition: String,
     product_model: String,
 }
@@ -379,8 +368,7 @@ mod tests {
             is_return: false,
         };
         let mut template_data = split_info(&label.qr_string, &label);
-        template_data.base64 = Some(qr_code_data_uri(&label.qr_string).expect("encode QR code"));
-        template_data.logo_base64 = Some("data:image/png;base64,logo".to_string());
+        template_data.qr_code = Some(qr_code_data_uri(&label.qr_string).expect("encode QR code"));
         let rendered = TEMPLATES
             .render(
                 "template.html",

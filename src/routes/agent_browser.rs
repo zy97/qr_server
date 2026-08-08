@@ -19,11 +19,8 @@ use crate::requests::dtos::create_lable_dto::LabelInfo;
 
 static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
     let mut tera = Tera::new();
-    tera.add_template_file(
-        "templates/agent-browser-template.html",
-        Some("template.html"),
-    )
-    .expect("failed to load agent-browser template");
+    tera.add_template_file("templates/template.html", Some("template.html"))
+        .expect("failed to load agent-browser template");
     tera.autoescape_on(vec![".html", ".sql"]);
     tera
 });
@@ -235,7 +232,8 @@ mod tests {
     #[test]
     fn renders_template_without_relative_qr_file() {
         let mut template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001");
-        template_data.qr_code = Some(qr_code_data_uri("M001").expect("encode QR code"));
+        let qr_code = qr_code_data_uri("M001").expect("encode QR code");
+        template_data.qr_code = Some(qr_code.clone());
         let rendered = TEMPLATES
             .render(
                 "template.html",
@@ -243,8 +241,8 @@ mod tests {
             )
             .expect("agent-browser template should render");
 
-        assert!(!rendered.contains("<img src=\"./qr.png\" height=\"150\" />"));
-        assert!(rendered.contains("data:image/png;base64,"));
+        // 共用模板中 QR 图片必须渲染为传入的 data URI（相对路径形式只存在于 HTML 注释里）
+        assert!(rendered.contains(&format!("<img src=\"{qr_code}\" height=\"150\" />")));
     }
 
     #[test]

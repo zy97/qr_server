@@ -14,8 +14,8 @@ use tracing::{error, info};
 use crate::err::CustomError;
 use crate::requests::dtos::create_lable_dto::LabelInfo;
 
-const TEMPLATE_FILE: &str = "main.typ";
-const DATA_FILE: &str = "data.json";
+const TEMPLATE_FILE: &str = "templates/main.typ";
+const DATA_FILE: &str = "templates/data.json";
 const OUTPUT_FILE: &str = "main.png";
 const COMPILE_TIMEOUT: Duration = Duration::from_secs(10);
 
