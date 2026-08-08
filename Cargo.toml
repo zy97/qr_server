@@ -4,7 +4,7 @@ name = "qr_service"
 version = "0.1.0"
 
 [features]
-default = ["chrome"]
+default = ["typst"]
 master = [
     "dep:anyhow",
     "dep:base64",
@@ -14,8 +14,8 @@ master = [
     "dep:tera",
 ]
 typst = [
-    "dep:actix-files",
     "dep:serde_json",
+    "dep:tokio",
 ]
 chrome = [
     "dep:anyhow",
@@ -35,7 +35,6 @@ agent-browser = [
 ]
 [dependencies]
 serde_json = { version = "1.0", optional = true }
-actix-files = { version = "0.6", optional = true }
 actix-web = "4"
 anyhow = { version = "1", optional = true }
 chromiumoxide = { version = "=0.9.1", optional = true }
@@ -48,7 +47,7 @@ qrcode = { version = "0.14.1", optional = true }
 serde = { version = "1", features = ["derive"] }
 tera = { version = "2.1.0", default-features = false, optional = true }
 thiserror = "2"
-tokio = { version = "1", features = ["sync"], optional = true }
+tokio = { version = "1", features = ["sync", "process", "fs", "io-util", "time", "rt"], optional = true }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = "0.3.23"
