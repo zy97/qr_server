@@ -1,18 +1,15 @@
 use actix_web::{post, web, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine};
-use headless_chrome::{
-    browser::default_executable, protocol::cdp::Page, Browser, LaunchOptions, Tab,
-};
+use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::page::{CaptureScreenshotFormat, Viewport};
+use chromiumoxide::page::{Page, ScreenshotParams};
+use futures::StreamExt;
 use image::{DynamicImage, ImageFormat, Luma};
 use qrcode::QrCode;
 use serde::Serialize;
-use std::{
-    ffi::OsStr,
-    io::Cursor,
-    sync::{Arc, LazyLock, Mutex},
-    time::{Duration, Instant},
-};
+use std::{io::Cursor, sync::LazyLock, time::Instant};
 use tera::{Context, Tera};
+use tokio::sync::{Mutex, OnceCell};
 use tracing::info;
 
 use crate::err::CustomError;
@@ -29,34 +26,56 @@ static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
     tera
 });
 
-static BROWSER: LazyLock<Browser> = LazyLock::new(|| {
-    let started = Instant::now();
-    let launch_options = LaunchOptions::default_builder()
-        .path(Some(default_executable().map_err(|e| e).unwrap()))
-        .window_size(Some((BROWSER_WINDOW_WIDTH, BROWSER_WINDOW_HEIGHT)))
-        .idle_browser_timeout(Duration::from_secs(86_400))
-        .build()
-        .unwrap();
-    let browser = Browser::new(LaunchOptions {
-        headless: true,
-        args: vec![
-            OsStr::new("--disable-gpu"),
-            OsStr::new("--force-device-scale-factor=1"),
-            OsStr::new("--disable-background-timer-throttling"),
-            OsStr::new("--disable-renderer-backgrounding"),
-            OsStr::new("--disable-backgrounding-occluded-windows"),
-        ],
-        ..launch_options
-    })
-    .unwrap();
-    info!(
-        elapsed_ms = started.elapsed().as_millis(),
-        "chrome browser initialized"
-    );
-    browser
-});
+struct ChromeState {
+    browser: Browser,
+    page: Mutex<Option<Page>>,
+}
 
-static CTAB: LazyLock<Mutex<Option<Arc<Tab>>>> = LazyLock::new(|| Mutex::new(None));
+static CHROME: OnceCell<ChromeState> = OnceCell::const_new();
+
+// 首次请求时惰性启动浏览器；chromiumoxide 只探测本机已安装的
+// Chrome/Chromium/Edge，不会自动下载浏览器
+async fn chrome_state() -> Result<&'static ChromeState, CustomError> {
+    CHROME
+        .get_or_try_init(|| async {
+            let started = Instant::now();
+            // 按进程使用独立 user-data-dir，避免残留浏览器进程持有单例锁导致启动即退出
+            let user_data_dir =
+                std::env::temp_dir().join(format!("qr-service-chrome-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&user_data_dir);
+            let config = BrowserConfig::builder()
+                .window_size(BROWSER_WINDOW_WIDTH, BROWSER_WINDOW_HEIGHT)
+                .user_data_dir(&user_data_dir)
+                .args([
+                    "--disable-gpu",
+                    "--force-device-scale-factor=1",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                    "--disable-backgrounding-occluded-windows",
+                ])
+                .build()
+                .map_err(anyhow::Error::msg)?;
+            let (browser, mut handler) = Browser::launch(config).await?;
+            // handler 驱动 websocket，必须持续轮询
+            actix_web::rt::spawn(async move {
+                while let Some(event) = handler.next().await {
+                    if event.is_err() {
+                        break;
+                    }
+                }
+            });
+            info!(
+                elapsed_ms = started.elapsed().as_millis(),
+                "chrome browser initialized"
+            );
+            Ok::<ChromeState, anyhow::Error>(ChromeState {
+                browser,
+                page: Mutex::new(None),
+            })
+        })
+        .await
+        .map_err(CustomError::from)
+}
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
@@ -64,8 +83,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
-    // 整个图片渲染时间大致在600-700ms附近跳动
-    // 优化之后在200-500附近跳动
+    // 使用chromiumoxide重构耗时在200ms附近跳动
     let request_started = Instant::now();
     let labels = labels.into_inner();
     let label_count = labels.len();
@@ -83,7 +101,7 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
             "chrome template rendered"
         );
 
-        let image_data = capture_label_screenshot(&rendered)?;
+        let image_data = capture_label_screenshot(&rendered).await?;
         result_image = Some(image_data);
     }
 
@@ -99,35 +117,40 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
         .body(result_image))
 }
 
-fn capture_label_screenshot(rendered: &str) -> Result<Vec<u8>, CustomError> {
+async fn capture_label_screenshot(rendered: &str) -> Result<Vec<u8>, CustomError> {
+    let state = chrome_state().await?;
+
     for attempt in 0..2 {
         let result = {
-            let mut tab = CTAB
-                .lock()
-                .map_err(|error| CustomError::OtherLibraryError(error.to_string()))?;
-            if tab.is_none() {
-                let tab_started = Instant::now();
-                *tab = Some(BROWSER.new_tab()?);
+            let mut page = state.page.lock().await;
+            if page.is_none() {
+                let page_started = Instant::now();
+                *page = Some(
+                    state
+                        .browser
+                        .new_page("about:blank")
+                        .await
+                        .map_err(anyhow::Error::new)?,
+                );
                 info!(
-                    elapsed_ms = tab_started.elapsed().as_millis(),
-                    "chrome tab initialized"
+                    elapsed_ms = page_started.elapsed().as_millis(),
+                    "chrome page initialized"
                 );
             }
 
-            capture_label_screenshot_with_tab(
-                tab.as_ref().expect("tab should be initialized"),
+            capture_label_screenshot_with_page(
+                page.as_ref().expect("page should be initialized"),
                 rendered,
             )
+            .await
         };
 
         match result {
             Ok(image_data) => return Ok(image_data),
-            Err(error) if attempt == 0 && is_inactive_page_error(&error) => {
-                let mut tab = CTAB
-                    .lock()
-                    .map_err(|error| CustomError::OtherLibraryError(error.to_string()))?;
-                *tab = None;
-                info!("chrome tab reset after inactive page");
+            Err(error) if attempt == 0 => {
+                let mut page = state.page.lock().await;
+                *page = None;
+                info!(%error, "chrome page reset after capture failure");
             }
             Err(error) => return Err(error.into()),
         }
@@ -138,19 +161,19 @@ fn capture_label_screenshot(rendered: &str) -> Result<Vec<u8>, CustomError> {
     ))
 }
 
-fn capture_label_screenshot_with_tab(
-    tab: &Arc<Tab>,
+async fn capture_label_screenshot_with_page(
+    page: &Page,
     rendered: &str,
 ) -> Result<Vec<u8>, anyhow::Error> {
     let navigate_started = Instant::now();
-    let tab = tab.navigate_to(&html_data_url(rendered))?;
+    page.goto(html_data_url(rendered)).await?;
     info!(
         elapsed_ms = navigate_started.elapsed().as_millis(),
         "chrome page navigated"
     );
 
     let ready_started = Instant::now();
-    let viewport = wait_for_label_paint(tab)?;
+    let viewport = wait_for_label_paint(page).await?;
     info!(
         elapsed_ms = ready_started.elapsed().as_millis(),
         width = viewport.width,
@@ -159,12 +182,17 @@ fn capture_label_screenshot_with_tab(
     );
 
     let screenshot_started = Instant::now();
-    let image_data = tab.capture_screenshot(
-        Page::CaptureScreenshotFormatOption::Png,
-        Some(75),
-        Some(viewport),
-        true,
-    )?;
+    let image_data = page
+        .screenshot(
+            ScreenshotParams::builder()
+                .format(CaptureScreenshotFormat::Png)
+                .quality(75)
+                .clip(viewport)
+                .from_surface(true)
+                .capture_beyond_viewport(true)
+                .build(),
+        )
+        .await?;
     info!(
         elapsed_ms = screenshot_started.elapsed().as_millis(),
         "chrome screenshot captured"
@@ -173,12 +201,12 @@ fn capture_label_screenshot_with_tab(
     Ok(image_data)
 }
 
-fn wait_for_label_paint(tab: &Tab) -> Result<Page::Viewport, anyhow::Error> {
-    let result = tab.evaluate(label_ready_script(), true)?;
-    let value = result
-        .value
-        .and_then(|value| value.as_str().map(str::to_string))
-        .ok_or_else(|| anyhow::anyhow!("label ready script returned no viewport"))?;
+async fn wait_for_label_paint(page: &Page) -> Result<Viewport, anyhow::Error> {
+    let value: String = page
+        .evaluate(label_ready_script())
+        .await?
+        .into_value()
+        .map_err(|error| anyhow::anyhow!("label ready script returned no viewport: {error}"))?;
 
     parse_label_viewport(&value)
 }
@@ -235,7 +263,7 @@ fn label_ready_script() -> &'static str {
     "##
 }
 
-fn parse_label_viewport(value: &str) -> Result<Page::Viewport, anyhow::Error> {
+fn parse_label_viewport(value: &str) -> Result<Viewport, anyhow::Error> {
     let parts = value
         .split(',')
         .map(str::parse::<f64>)
@@ -245,17 +273,13 @@ fn parse_label_viewport(value: &str) -> Result<Page::Viewport, anyhow::Error> {
         anyhow::bail!("invalid label viewport: {value}");
     }
 
-    Ok(Page::Viewport {
+    Ok(Viewport {
         x: parts[0].floor().max(0.0),
         y: parts[1].floor().max(0.0),
         width: parts[2].ceil(),
         height: parts[3].ceil(),
         scale: 1.0,
     })
-}
-
-fn is_inactive_page_error(error: &anyhow::Error) -> bool {
-    error.to_string().contains("Not attached to an active page")
 }
 
 fn split_info(code: &str, label: &LabelInfo) -> TemplateData {
