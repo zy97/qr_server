@@ -295,9 +295,9 @@ fn split_info(code: &str, label: &LabelInfo) -> TemplateData {
         date: infos[5].to_string(),
         box_no: infos[6].to_string(),
         customer_name: label.customer_name.clone(),
+        part_no: label.part_no.clone(),
+        material_name: label.material_name.clone(),
         qr_code: None,
-        descrpition: label.material_name.clone(),
-        product_model: label.part_no.clone(),
     }
 }
 
@@ -320,7 +320,6 @@ fn html_data_url(html: &str) -> String {
 }
 
 #[derive(Serialize, Debug)]
-#[serde(rename_all = "PascalCase")]
 struct TemplateData {
     material_no: String,
     lot_no: String,
@@ -330,9 +329,9 @@ struct TemplateData {
     date: String,
     box_no: String,
     customer_name: String,
+    part_no: String,
+    material_name: String,
     qr_code: Option<String>,
-    descrpition: String,
-    product_model: String,
 }
 
 #[cfg(test)]
@@ -352,9 +351,18 @@ mod tests {
         let template_data = split_info(&label.qr_string, &label);
         let context = Context::from_serialize(&template_data).expect("serialize template data");
 
-        TEMPLATES
+        let rendered = TEMPLATES
             .render("template.html", &context)
             .expect("chrome template should render with chrome template data");
+
+        // 与 main.typ 一致的动态字段都应渲染出来
+        assert!(rendered.contains("P-001"));
+        assert!(rendered.contains("物料"));
+        assert!(rendered.contains("客户"));
+        assert!(rendered.contains("M001"));
+        assert!(rendered.contains("L001"));
+        assert!(rendered.contains("O001"));
+        assert!(rendered.contains("B001"));
     }
 
     #[test]

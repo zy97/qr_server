@@ -56,5 +56,3 @@ criterion = "0.8.2"
 [[bench]]
 harness = false
 name = "qr_benchmark"
-
-

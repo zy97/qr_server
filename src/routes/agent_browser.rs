@@ -44,7 +44,7 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
 
     for label in labels {
         let render_started = Instant::now();
-        let mut infos = split_info(&label.qr_string);
+        let mut infos = split_info(&label.qr_string, &label);
         infos.qr_code = Some(qr_code_data_uri(&label.qr_string)?);
 
         let rendered = TEMPLATES.render("template.html", &Context::from_serialize(&infos)?)?;
@@ -111,7 +111,7 @@ fn command_path(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn split_info(code: &str) -> TemplateData {
+fn split_info(code: &str, label: &LabelInfo) -> TemplateData {
     let infos = code.split('|').collect::<Vec<&str>>();
     TemplateData {
         material_no: infos[0].to_string(),
@@ -121,6 +121,9 @@ fn split_info(code: &str) -> TemplateData {
         vender_code: infos[4].to_string(),
         date: infos[5].to_string(),
         box_no: infos[6].to_string(),
+        part_no: label.part_no.clone(),
+        material_name: label.material_name.clone(),
+        customer_name: label.customer_name.clone(),
         qr_code: None,
     }
 }
@@ -185,6 +188,9 @@ struct TemplateData {
     vender_code: String,
     date: String,
     box_no: String,
+    part_no: String,
+    material_name: String,
+    customer_name: String,
     qr_code: Option<String>,
 }
 
@@ -192,14 +198,34 @@ struct TemplateData {
 mod tests {
     use super::*;
 
+    fn sample_label() -> LabelInfo {
+        LabelInfo {
+            kind: 0,
+            customer_name: "测试客户".to_string(),
+            part_no: "P-001".to_string(),
+            material_name: "测试物料".to_string(),
+            qr_string: "M001|L001|O001|10|V001|2026-08-07|B001".to_string(),
+            is_return: false,
+        }
+    }
+
     #[test]
     fn renders_template_with_agent_browser_template_data() {
-        let template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001");
+        let template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001", &sample_label());
         let context = Context::from_serialize(&template_data).expect("serialize template data");
 
-        TEMPLATES
+        let rendered = TEMPLATES
             .render("template.html", &context)
             .expect("agent-browser template should render with master template data");
+
+        // 与 main.typ 一致的动态字段都应渲染出来
+        assert!(rendered.contains("P-001"));
+        assert!(rendered.contains("测试物料"));
+        assert!(rendered.contains("测试客户"));
+        assert!(rendered.contains("M001"));
+        assert!(rendered.contains("L001"));
+        assert!(rendered.contains("O001"));
+        assert!(rendered.contains("B001"));
     }
 
     #[test]
@@ -231,7 +257,8 @@ mod tests {
 
     #[test]
     fn renders_template_without_relative_qr_file() {
-        let mut template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001");
+        let mut template_data =
+            split_info("M001|L001|O001|10|V001|2026-08-07|B001", &sample_label());
         let qr_code = qr_code_data_uri("M001").expect("encode QR code");
         template_data.qr_code = Some(qr_code.clone());
         let rendered = TEMPLATES
