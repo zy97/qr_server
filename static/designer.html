@@ -36,6 +36,9 @@
   <strong>标签模板设计器</strong>
   <button id="btn-save">保存模板</button>
   <button id="btn-preview">预览（示例数据）</button>
+  <label style="font-size:13px">面板宽 <input id="panel-w" type="number" step="0.1" min="10" style="width:60px"> mm</label>
+  <label style="font-size:13px">高 <input id="panel-h" type="number" step="0.1" min="10" style="width:60px"> mm</label>
+  <button id="btn-panel">应用面板尺寸</button>
   <span id="status"></span>
 </div>
 <div id="main">
@@ -124,6 +127,7 @@ function initDesigner(templateJson) {
   });
   $('#design-canvas').empty();
   hiprintTemplate.design('#design-canvas');
+  syncPanelSizeInputs();
 }
 
 function placeholderData() {
@@ -178,6 +182,22 @@ $('#btn-save').on('click', async () => {
   }
 });
 
+function syncPanelSizeInputs() {
+  let json = hiprintTemplate.getJson();
+  if (typeof json === 'string') json = JSON.parse(json);
+  const p = (json.panels && json.panels[0]) || {};
+  $('#panel-w').val(p.width || 150);
+  $('#panel-h').val(p.height || 70);
+}
+
+$('#btn-panel').on('click', () => {
+  const w = parseFloat($('#panel-w').val());
+  const h = parseFloat($('#panel-h').val());
+  if (!(w > 0 && h > 0)) { setStatus('面板尺寸无效', true); return; }
+  // hiprint 面板 resize：paperType 传 null 表示自定义尺寸（单位 mm）
+  hiprintTemplate.getPanel(0).resize(null, w, h);
+  setStatus('面板已调整为 ' + w + 'mm × ' + h + 'mm，保存后生效');
+});
 $('#btn-preview').on('click', () => {
   $('#preview-content').empty().append(hiprintTemplate.getHtml(sampleData()));
   $('#preview-mask').fadeIn(100);
