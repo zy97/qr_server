@@ -27,7 +27,7 @@
   #canvas-wrap { flex: 1; overflow: auto; padding: 20px; background: #e8e8e8; }
   #settings { width: 260px; border-left: 1px solid #ccc; overflow-y: auto; background: #fafafa; }
   #preview-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 99; }
-  #preview-box { position: absolute; top: 5%; left: 50%; transform: translateX(-50%); background: #fff; padding: 20px; border-radius: 6px; }
+  #preview-box { display: flex; gap: 16px; position: absolute; top: 5%; left: 50%; transform: translateX(-50%); background: #fff; padding: 20px; border-radius: 6px; }
   #preview-close { margin-top: 12px; }
 </style>
 </head>
@@ -48,25 +48,32 @@
 </div>
 <div id="preview-mask">
   <div id="preview-box">
-    <div id="preview-content"></div>
-    <button id="preview-close">关闭</button>
+    <div>
+      <div style="font-size:13px;margin-bottom:6px">预览数据（POST /label?print=false，qr_string 分段：物料编码|批次号|订单号|数量|供应商|日期|箱号）：</div>
+      <textarea id="preview-json" style="width:380px;height:280px;font-family:Consolas,monospace;font-size:12px"></textarea>
+      <div id="preview-fields" style="font-size:12px;color:#888;margin-top:6px;max-width:380px"></div>
+      <div style="margin-top:8px">
+        <button id="preview-render">渲染</button>
+        <button id="preview-close">关闭</button>
+        <span id="preview-status" style="font-size:12px;color:#c00;margin-left:8px"></span>
+      </div>
+    </div>
+    <div style="max-width:55vw;overflow:auto"><img id="preview-img" style="border:1px solid #ccc;background:#fff;display:none" alt=""></div>
   </div>
 </div>
 <script>
 // 与后端 TemplateData / main.typ 对齐的字段清单
 const FIELDS = [
-  { name: 'part_no',       title: '零件号',   sample: 'W4515654841155' },
-  { name: 'material_no',   title: '物料编码', sample: '479927000140' },
-  { name: 'material_name', title: '物料名称', sample: 'LQFC-0' },
-  { name: 'box_no',        title: '箱号',     sample: '900001' },
-  { name: 'order_no',      title: '生成订单号', sample: 'ASN240515000367' },
-  { name: 'count',         title: '数量',     sample: '100' },
-  { name: 'lot_no',        title: '批次号',   sample: '240514A634' },
-  { name: 'date',          title: '生产日期', sample: '2024-08-21' },
-  { name: 'customer_name', title: '客户名称', sample: '某某客户有限公司' },
+  { name: 'part_no',       title: '零件号' },
+  { name: 'material_no',   title: '物料编码' },
+  { name: 'material_name', title: '物料名称' },
+  { name: 'box_no',        title: '箱号' },
+  { name: 'order_no',      title: '生成订单号' },
+  { name: 'count',         title: '数量' },
+  { name: 'lot_no',        title: '批次号' },
+  { name: 'date',          title: '生产日期' },
+  { name: 'customer_name', title: '客户名称' },
 ];
-// 二维码由服务端生成 PNG data URI（字段 qr_code），设计器里用占位图预览
-const QR_SAMPLE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
 function labelProvider() {}
 labelProvider.prototype.addElementTypes = function (context) {
@@ -183,11 +190,56 @@ function placeholderData(templateJson) {
   return data;
 }
 
-function sampleData() {
-  const data = {};
-  FIELDS.forEach(f => { data[f.name] = f.sample; });
-  data.qr_code = QR_SAMPLE;
-  return data;
+// 预览直接调 /label 走真实渲染链路；请求体即 LabelInfo，用户可自由编辑，
+// 上次编辑内容存 localStorage
+const PREVIEW_STORAGE_KEY = 'qr_designer_preview_json';
+const DEFAULT_PREVIEW_DATA = {
+  kind: 0,
+  customer_name: '某某客户有限公司',
+  part_no: 'W4515654841155',
+  material_name: 'LQFC-0',
+  qr_string: '479927000140|240514A634|ASN240515000367|100|V001|2024-08-21|900001',
+  is_return: false,
+};
+
+// 提取当前模板实际用到的字段（字段绑定 + 文本内容里的 {{ }} 表达式）
+function collectUsedFields() {
+  let json = hiprintTemplate.getJson();
+  if (typeof json === 'string') json = JSON.parse(json);
+  const found = [];
+  ((json && json.panels) || []).forEach(p => (p.printElements || []).forEach(el => {
+    const o = el.options || {};
+    if (o.field && !found.includes(o.field)) found.push(o.field);
+    if (o.title) (String(o.title).match(/\{\{[^}]+\}\}/g) || [])
+      .forEach(m => { if (!found.includes(m)) found.push(m); });
+  }));
+  return found;
+}
+
+async function renderPreview() {
+  const $status = $('#preview-status').css('color', '#c00');
+  let label;
+  try {
+    label = JSON.parse($('#preview-json').val());
+  } catch (e) {
+    $status.text('JSON 格式错误: ' + e.message);
+    return;
+  }
+  localStorage.setItem(PREVIEW_STORAGE_KEY, $('#preview-json').val());
+  $status.css('color', '#888').text('渲染中…');
+  try {
+    const resp = await fetch('/label?print=false', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([label]),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + await resp.text());
+    const blob = await resp.blob();
+    $('#preview-img').attr('src', URL.createObjectURL(blob)).show();
+    $status.text('');
+  } catch (e) {
+    $status.css('color', '#c00').text('渲染失败: ' + e.message);
+  }
 }
 
 // hiprint 运行时注入到 head 的样式（排除本页面自身的 UI 样式），随模板一起保存，
@@ -266,11 +318,15 @@ $('#btn-panel').on('click', () => {
   setStatus('面板已调整为 ' + w + 'mm × ' + h + 'mm，保存后生效');
 });
 $('#btn-preview').on('click', () => {
-  $('#preview-content').empty().append(hiprintTemplate.getHtml(sampleData()));
+  $('#preview-json').val(localStorage.getItem(PREVIEW_STORAGE_KEY) || JSON.stringify(DEFAULT_PREVIEW_DATA, null, 2));
+  $('#preview-fields').text('当前模板使用字段：' + (collectUsedFields().join('、') || '（无）'));
   $('#preview-mask').fadeIn(100);
+  renderPreview();
 });
-$('#preview-close, #preview-mask').on('click', e => {
-  if (e.target.id !== 'preview-content') $('#preview-mask').fadeOut(100);
+$('#preview-render').on('click', renderPreview);
+$('#preview-close').on('click', () => $('#preview-mask').fadeOut(100));
+$('#preview-mask').on('click', e => {
+  if (e.target.id === 'preview-mask') $('#preview-mask').fadeOut(100);
 });
 
 const templateId = new URLSearchParams(location.search).get('id') || 'default';

@@ -78,12 +78,25 @@ async fn chrome_state() -> Result<&'static ChromeState, CustomError> {
         .map_err(CustomError::from)
 }
 
+/// /label 查询参数：?print=false 跳过打印（模板设计器预览用）
+#[derive(serde::Deserialize)]
+pub struct LabelQuery {
+    print: Option<bool>,
+}
+
+fn should_print(config_enabled: bool, query: &LabelQuery) -> bool {
+    config_enabled && query.print != Some(false)
+}
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
 }
 
 #[post("/label")]
-async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
+async fn create_label(
+    labels: web::Json<Vec<LabelInfo>>,
+    query: web::Query<LabelQuery>,
+) -> Result<impl Responder, CustomError> {
     // 使用chromiumoxide重构耗时在200ms附近跳动
     let request_started = Instant::now();
     let labels = labels.into_inner();
@@ -103,7 +116,7 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
         );
 
         let image_data = capture_label_screenshot(&rendered).await?;
-        if crate::config::CONFIG.print.enabled {
+        if should_print(crate::config::CONFIG.print.enabled, &query) {
             crate::print::print_label_png(&image_data)?;
         }
         result_image = Some(image_data);
@@ -338,6 +351,17 @@ struct TemplateData {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn print_query_flag_overrides_config() {
+        let default = LabelQuery { print: None };
+        let off = LabelQuery { print: Some(false) };
+        let on = LabelQuery { print: Some(true) };
+        assert!(should_print(true, &default));
+        assert!(!should_print(false, &default));
+        assert!(!should_print(true, &off));
+        assert!(should_print(true, &on));
+    }
     use super::*;
 
     #[test]
