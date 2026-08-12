@@ -39,8 +39,6 @@
   <label style="font-size:13px">面板宽 <input id="panel-w" type="number" step="0.1" min="10" style="width:60px"> mm</label>
   <label style="font-size:13px">高 <input id="panel-h" type="number" step="0.1" min="10" style="width:60px"> mm</label>
   <button id="btn-panel">应用面板尺寸</button>
-  <label style="font-size:13px">前缀 <input id="affix-prefix" style="width:50px" disabled title="选中字段元素后可编辑"></label>
-  <label style="font-size:13px">后缀 <input id="affix-suffix" style="width:50px" disabled title="选中字段元素后可编辑，如：个"></label>
   <span id="status"></span>
 </div>
 <div id="main">
@@ -118,7 +116,7 @@ function buildPalette() {
     });
   });
   $palette.append($('<div style="padding:8px 4px;font-size:12px;color:#888;line-height:1.6"></div>')
-    .text('提示：固定文本内容或字段名里都可直接写占位符表达式，如 {{ count }}个，渲染时会替换成 100个；字段元素选中后也可在顶部加前后缀。'));
+    .text('提示：固定文本内容或字段名里都可直接写占位符表达式，如 {{ count }}个，渲染时会替换成 100个。'));
 }
 
 // 画布上字段元素显示 {{ 字段名 }} 占位符，直观看清绑定关系；
@@ -133,38 +131,30 @@ function applyFieldPlaceholders(designJson) {
   return designJson;
 }
 
-// 字段前后缀：hiprint 的 formatter 以字符串形式存储（可随模板 JSON 持久化），
-// 渲染时由 hiprint eval 成函数；prefix/suffix 为普通字符串选项
-const AFFIX_FORMATTER = "function(title, value, options){ return (options.prefix || '') + (value == null ? '' : value) + (options.suffix || ''); }";
 
-let selectedElement = null;
-
-function bindAffixInputs() {
-  // 元素选中和取消选中事件
-  hinnn.event.on(hiprintTemplate.getPrintElementSelectEventKey(), (e) => {
-    const el = e.printElement;
-    const o = el && el.options;
-    if (o && o.field) {
-      selectedElement = el;
-      $('#affix-prefix').val(o.prefix || '').prop('disabled', false);
-      $('#affix-suffix').val(o.suffix || '').prop('disabled', false);
-    } else {
-      selectedElement = null;
-      $('#affix-prefix, #affix-suffix').val('').prop('disabled', true);
-    }
-  });
-  hinnn.event.on('clearSettingContainer', () => {
-    selectedElement = null;
-    $('#affix-prefix, #affix-suffix').val('').prop('disabled', true);
-  });
-  $('#affix-prefix, #affix-suffix').on('input', () => {
-    if (!selectedElement) return;
-    const o = selectedElement.options;
-    o.prefix = $('#affix-prefix').val();
-    o.suffix = $('#affix-suffix').val();
-    if (o.prefix || o.suffix) o.formatter = AFFIX_FORMATTER; else delete o.formatter;
-    selectedElement.updateDesignViewFromOptions();
-  });
+// 按元素是否绑定字段裁剪右侧参数面板：
+// 固定文本不显示「字段名/测试数据」，字段元素不显示「标题」
+// （面板是按 text 类原型共享构建的，在原型上按实例过滤，新拖入的元素同样生效）
+function customizeOptionPanels() {
+  const panel = hiprintTemplate.getPanel(0);
+  const textEl = (panel.printElements || []).find(e => e.printElementType && e.printElementType.type === 'text');
+  if (!textEl) return;
+  const proto = Object.getPrototypeOf(textEl);
+  if (proto.__optionPanelPatched) return;
+  proto.__optionPanelPatched = true;
+  const original = proto.getConfigOptions;
+  proto.getConfigOptions = function () {
+    const cfg = original.call(this);
+    const hasField = !!((this.options && this.options.field) || (this.printElementType && this.printElementType.field));
+    const drop = hasField ? ['title'] : ['field', 'testData'];
+    return {
+      ...cfg,
+      tabs: (cfg.tabs || []).map(tab => ({
+        ...tab,
+        options: (tab.options || []).filter(o => !drop.includes(o.name)),
+      })),
+    };
+  };
 }
 
 function initDesigner(templateJson) {
@@ -178,7 +168,7 @@ function initDesigner(templateJson) {
   $('#design-canvas').empty();
   hiprintTemplate.design('#design-canvas');
   syncPanelSizeInputs();
-  bindAffixInputs();
+  customizeOptionPanels();
 }
 
 function placeholderData(templateJson) {
