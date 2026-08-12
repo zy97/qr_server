@@ -145,22 +145,43 @@ function sampleData() {
 }
 
 // hiprint 运行时注入到 head 的样式（排除本页面自身的 UI 样式），随模板一起保存，
-// 保证 Tera 渲染出的 HTML 脱离 hiprint 也能正常显示
+// 保证 Tera 渲染出的 HTML 脱离 hiprint 也能正常显示。
+// 保存的模板只用于展示：剔除设计态规则（拖拽手柄/虚线框/右键菜单/参数面板等）和打印媒体查询
+const DESIGN_CSS_RE = /\.design|resize-panel|hicontextmenu|hiprint-option|prop-tab|hi-pretty|hidraggable|hiprint-combo|select2|daterangepicker/;
 function collectHiprintCss() {
-  return $('head style').not('#designer-ui-style').map((i, el) => el.textContent).get().join('\n');
+  const raw = $('head style').not('#designer-ui-style').map((i, el) => el.textContent).get().join('\n');
+  const rules = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === '{') depth++;
+    else if (raw[i] === '}') {
+      depth--;
+      if (depth === 0) { rules.push(raw.slice(start, i + 1)); start = i + 1; }
+    }
+  }
+  return rules.filter(rule => {
+    const selector = rule.slice(0, rule.indexOf('{')).trim();
+    if (selector.startsWith('@media')) return false;
+    return !DESIGN_CSS_RE.test(selector);
+  }).join('\n');
 }
 
 function buildTemplateHtml() {
   let json = hiprintTemplate.getJson();
   if (typeof json === 'string') json = JSON.parse(json);
   const $html = hiprintTemplate.getHtml(placeholderData());
-  const panelHtml = $('<div>').append($html).html();
+  const $wrap = $('<div>').append($html);
+  // 纯展示模板：去掉可聚焦属性（点击会出现焦点高亮框）和浏览器打印用的 @page 块
+  $wrap.find('[tabindex]').removeAttr('tabindex');
+  $wrap.find('style[printstyle]').remove();
+  const panelHtml = $wrap.html();
   const panel = (json.panels && json.panels[0]) || {};
   const width = panel.width || 150;
   const height = panel.height || 80;
   const doc = '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n'
     + '<style>\nhtml, body { margin: 0; padding: 0; }\n'
     + 'body { font-family: "Microsoft YaHei UI", sans-serif; font-weight: bold; }\n'
+    + '#app *:focus { outline: none !important; }\n'
     + '#app { position: relative; width: ' + width + 'mm; height: ' + height + 'mm; overflow: hidden; }\n'
     + '</style>\n<style>\n' + collectHiprintCss() + '\n</style>\n</head>\n<body>\n'
     + '<div id="app">' + panelHtml + '</div>\n</body>\n</html>';
