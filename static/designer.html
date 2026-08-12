@@ -75,7 +75,7 @@ labelProvider.prototype.addElementTypes = function (context) {
     title: f.title,
     field: f.name,
     type: 'text',
-    options: { width: 120, height: 24, fontSize: 10.5, fontWeight: '700', textAlign: 'center', hideTitle: true }
+    options: { width: 120, height: 24, fontSize: 10.5, fontWeight: '700', textAlign: 'center', hideTitle: true, testData: '{{ ' + f.name + ' }}' }
   }));
   context.addPrintElementTypes('labelModule', [
     new hiprint.PrintElementTypeGroup('标签字段', fieldEls),
@@ -115,6 +115,16 @@ function buildPalette() {
       $palette.append($('<div class="ep-draggable-item"></div>').attr('tid', item.tid).text(item.title));
     });
   });
+}
+
+// 画布上字段元素显示 {{ 字段名 }} 占位符，直观看清绑定关系；
+// testData 只影响设计态显示，保存后的渲染 HTML 始终由占位符数据生成，不受影响
+function applyFieldPlaceholders(designJson) {
+  ((designJson && designJson.panels) || []).forEach(p => (p.printElements || []).forEach(el => {
+    const o = el.options || {};
+    if (o.field && !o.testData) o.testData = '{{ ' + o.field + ' }}';
+  }));
+  return designJson;
 }
 
 function initDesigner(templateJson) {
@@ -235,7 +245,7 @@ $(async () => {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const record = await resp.json();
     $('#tpl-name').text('— ' + record.name + (record.is_default ? '（默认）' : ''));
-    initDesigner(record.design_json);
+    initDesigner(applyFieldPlaceholders(record.design_json));
     setStatus('已加载模板');
   } catch (e) {
     initDesigner({ panels: [{ index: 0, width: 150, height: 70, paperHeader: 0, paperFooter: 198.4, paperNumberDisabled: true, printElements: [] }] });
