@@ -19,13 +19,14 @@ use crate::requests::dtos::create_lable_dto::LabelInfo;
 const BROWSER_WINDOW_WIDTH: u32 = 800;
 const BROWSER_WINDOW_HEIGHT: u32 = 500;
 
-static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
+/// 每次请求重新从磁盘加载模板：设计器保存 template.html 后无需重启即可生效
+/// （解析约 150KB，毫秒级，相对浏览器截图耗时可忽略）
+fn load_templates() -> Result<Tera, CustomError> {
     let mut tera = Tera::new();
-    tera.add_template_file("templates/template.html", Some("template.html"))
-        .expect("failed to load master template");
+    tera.add_template_file("templates/template.html", Some("template.html"))?;
     tera.autoescape_on(vec![".html", ".sql"]);
-    tera
-});
+    Ok(tera)
+}
 
 static BROWSER: LazyLock<Browser> = LazyLock::new(|| {
     let started = Instant::now();
@@ -65,12 +66,13 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
     let label_count = labels.len();
     let mut result_image = None;
 
+    let templates = load_templates()?;
     for label in labels {
         let render_started = Instant::now();
         let mut infos = split_info(&label.qr_string, &label);
         infos.qr_code = Some(qr_code_data_uri(&label.qr_string)?);
 
-        let rendered = TEMPLATES.render("template.html", &Context::from_serialize(&infos)?)?;
+        let rendered = templates.render("template.html", &Context::from_serialize(&infos)?)?;
         info!(
             elapsed_ms = render_started.elapsed().as_millis(),
             "master template rendered"
@@ -322,7 +324,8 @@ mod tests {
     #[test]
     fn renders_template_without_html2canvas() {
         let template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001", &sample_label());
-        let rendered = TEMPLATES
+        let rendered = load_templates()
+            .expect("load templates")
             .render(
                 "template.html",
                 &Context::from_serialize(&template_data).expect("serialize template data"),
@@ -344,7 +347,8 @@ mod tests {
     #[test]
     fn encodes_rendered_template_as_html_data_url() {
         let template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001", &sample_label());
-        let rendered = TEMPLATES
+        let rendered = load_templates()
+            .expect("load templates")
             .render(
                 "template.html",
                 &Context::from_serialize(&template_data).expect("serialize template data"),

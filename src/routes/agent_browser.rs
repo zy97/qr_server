@@ -8,7 +8,6 @@ use std::{
     io::Cursor,
     path::PathBuf,
     process::{self, Command},
-    sync::LazyLock,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tera::{Context, Tera};
@@ -17,13 +16,14 @@ use tracing::info;
 use crate::err::CustomError;
 use crate::requests::dtos::create_lable_dto::LabelInfo;
 
-static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
+/// 每次请求重新从磁盘加载模板：设计器保存 template.html 后无需重启即可生效
+/// （解析约 150KB，毫秒级，相对浏览器截图耗时可忽略）
+fn load_templates() -> Result<Tera, CustomError> {
     let mut tera = Tera::new();
-    tera.add_template_file("templates/template.html", Some("template.html"))
-        .expect("failed to load agent-browser template");
+    tera.add_template_file("templates/template.html", Some("template.html"))?;
     tera.autoescape_on(vec![".html", ".sql"]);
-    tera
-});
+    Ok(tera)
+}
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
@@ -42,12 +42,13 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
         .ok_or_else(|| CustomError::OtherLibraryError("invalid agent-browser path".to_string()))?;
     let mut result_image = None;
 
+    let templates = load_templates()?;
     for label in labels {
         let render_started = Instant::now();
         let mut infos = split_info(&label.qr_string, &label);
         infos.qr_code = Some(qr_code_data_uri(&label.qr_string)?);
 
-        let rendered = TEMPLATES.render("template.html", &Context::from_serialize(&infos)?)?;
+        let rendered = templates.render("template.html", &Context::from_serialize(&infos)?)?;
         info!(
             elapsed_ms = render_started.elapsed().as_millis(),
             "agent-browser template rendered"
@@ -214,7 +215,8 @@ mod tests {
         let template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001", &sample_label());
         let context = Context::from_serialize(&template_data).expect("serialize template data");
 
-        let rendered = TEMPLATES
+        let rendered = load_templates()
+            .expect("load templates")
             .render("template.html", &context)
             .expect("agent-browser template should render with master template data");
 
@@ -261,7 +263,8 @@ mod tests {
             split_info("M001|L001|O001|10|V001|2026-08-07|B001", &sample_label());
         let qr_code = qr_code_data_uri("M001").expect("encode QR code");
         template_data.qr_code = Some(qr_code.clone());
-        let rendered = TEMPLATES
+        let rendered = load_templates()
+            .expect("load templates")
             .render(
                 "template.html",
                 &Context::from_serialize(&template_data).expect("serialize template data"),
