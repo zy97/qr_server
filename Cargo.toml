@@ -13,7 +13,6 @@ master = [
     "dep:tera",
 ]
 typst = [
-    "dep:serde_json",
     "dep:tokio",
 ]
 chrome = [
@@ -31,7 +30,7 @@ agent-browser = [
     "dep:tera",
 ]
 [dependencies]
-serde_json = { version = "1.0", optional = true }
+serde_json = "1.0"
 actix-web = "4"
 anyhow = { version = "1", optional = true }
 chromiumoxide = { version = "=0.9.1", optional = true }

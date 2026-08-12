@@ -269,7 +269,7 @@ mod tests {
             .expect("agent-browser template should render");
 
         // 共用模板中 QR 图片必须渲染为传入的 data URI（相对路径形式只存在于 HTML 注释里）
-        assert!(rendered.contains(&format!("<img src=\"{qr_code}\" height=\"150\" />")));
+        assert!(rendered.contains(&format!("src=\"{qr_code}\"")));
     }
 
     #[test]

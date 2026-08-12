@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>标签模板设计器</title>
+<script>window.autoConnect = false;</script>
+<script src="/designer/vendor/jquery.min.js"></script>
+<script src="/designer/vendor/JsBarcode.all.min.js"></script>
+<script src="/designer/vendor/bwip-js-min.js"></script>
+<script>window["bwip-js"] = window.bwipjs;</script>
+<script src="/designer/vendor/socket.io.min.js"></script>
+<script src="/designer/vendor/jspdf.umd.min.js"></script>
+<script src="/designer/vendor/html2canvas.min.js"></script>
+<script src="/designer/vendor/canvg.umd.js"></script>
+<script src="/designer/vendor/vue-plugin-hiprint.js"></script>
+<style id="designer-ui-style">
+  html, body { margin: 0; height: 100%; font-family: "Microsoft YaHei UI", sans-serif; }
+  #toolbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: #2d3a4a; color: #fff; }
+  #toolbar button { padding: 6px 18px; font-size: 14px; cursor: pointer; border: 0; border-radius: 4px; background: #4a90d9; color: #fff; }
+  #toolbar button:hover { background: #357ab8; }
+  #status { margin-left: auto; font-size: 13px; }
+  #main { display: flex; height: calc(100% - 45px); }
+  #palette { width: 160px; border-right: 1px solid #ccc; overflow-y: auto; padding: 8px; background: #f7f7f7; }
+  #palette .group-title { font-size: 12px; color: #888; margin: 8px 0 4px; }
+  .ep-draggable-item { padding: 6px 8px; margin-bottom: 4px; background: #fff; border: 1px solid #d0d0d0; border-radius: 4px; cursor: grab; font-size: 13px; }
+  .ep-draggable-item:hover { border-color: #4a90d9; }
+  #canvas-wrap { flex: 1; overflow: auto; padding: 20px; background: #e8e8e8; }
+  #settings { width: 260px; border-left: 1px solid #ccc; overflow-y: auto; background: #fafafa; }
+  #preview-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 99; }
+  #preview-box { position: absolute; top: 5%; left: 50%; transform: translateX(-50%); background: #fff; padding: 20px; border-radius: 6px; }
+  #preview-close { margin-top: 12px; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <strong>标签模板设计器</strong>
+  <button id="btn-save">保存模板</button>
+  <button id="btn-preview">预览（示例数据）</button>
+  <span id="status"></span>
+</div>
+<div id="main">
+  <div id="palette"></div>
+  <div id="canvas-wrap"><div id="design-canvas"></div></div>
+  <div id="settings"><div id="PrintElementOptionSetting"></div></div>
+</div>
+<div id="preview-mask">
+  <div id="preview-box">
+    <div id="preview-content"></div>
+    <button id="preview-close">关闭</button>
+  </div>
+</div>
+<script>
+// 与后端 TemplateData / main.typ 对齐的字段清单
+const FIELDS = [
+  { name: 'part_no',       title: '零件号',   sample: 'W4515654841155' },
+  { name: 'material_no',   title: '物料编码', sample: '479927000140' },
+  { name: 'material_name', title: '物料名称', sample: 'LQFC-0' },
+  { name: 'box_no',        title: '箱号',     sample: '900001' },
+  { name: 'order_no',      title: '生成订单号', sample: 'ASN240515000367' },
+  { name: 'count',         title: '数量',     sample: '100' },
+  { name: 'lot_no',        title: '批次号',   sample: '240514A634' },
+  { name: 'date',          title: '生产日期', sample: '2024-08-21' },
+  { name: 'customer_name', title: '客户名称', sample: '某某客户有限公司' },
+];
+// 二维码由服务端生成 PNG data URI（字段 qr_code），设计器里用占位图预览
+const QR_SAMPLE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+function labelProvider() {}
+labelProvider.prototype.addElementTypes = function (context) {
+  const fieldEls = FIELDS.map(f => ({
+    tid: 'labelModule.' + f.name,
+    title: f.title,
+    field: f.name,
+    type: 'text',
+    options: { width: 120, height: 24, fontSize: 10.5, fontWeight: '700', textAlign: 'center', hideTitle: true }
+  }));
+  context.addPrintElementTypes('labelModule', [
+    new hiprint.PrintElementTypeGroup('标签字段', fieldEls),
+    new hiprint.PrintElementTypeGroup('基础元素', [
+      { tid: 'labelModule.qrCode', title: '二维码', type: 'image', field: 'qr_code', options: { width: 80, height: 80 } },
+      { tid: 'labelModule.text',  title: '固定文本', type: 'text', data: '文本', options: { width: 80, height: 24, fontSize: 10.5, fontWeight: '700' } },
+      { tid: 'labelModule.image', title: '图片', type: 'image', data: '', options: { width: 60, height: 40 } },
+      { tid: 'labelModule.hline', title: '横线', type: 'hline', options: { width: 120 } },
+      { tid: 'labelModule.vline', title: '竖线', type: 'vline', options: { height: 120 } },
+      { tid: 'labelModule.rect',  title: '矩形', type: 'rect', options: { width: 120, height: 40 } },
+    ]),
+  ]);
+};
+
+var hiprintTemplate = null;
+
+function setStatus(msg, isError) {
+  $('#status').text(msg).css('color', isError ? '#ff9d9d' : '#9de69d');
+}
+
+function buildPalette() {
+  const groups = [
+    { title: '标签字段', items: FIELDS.map(f => ({ tid: 'labelModule.' + f.name, title: f.title })) },
+    { title: '基础元素', items: [
+      { tid: 'labelModule.qrCode', title: '二维码' },
+      { tid: 'labelModule.text', title: '固定文本' },
+      { tid: 'labelModule.image', title: '图片' },
+      { tid: 'labelModule.hline', title: '横线' },
+      { tid: 'labelModule.vline', title: '竖线' },
+      { tid: 'labelModule.rect', title: '矩形' },
+    ]},
+  ];
+  const $palette = $('#palette').empty();
+  groups.forEach(g => {
+    $palette.append($('<div class="group-title"></div>').text(g.title));
+    g.items.forEach(item => {
+      $palette.append($('<div class="ep-draggable-item"></div>').attr('tid', item.tid).text(item.title));
+    });
+  });
+}
+
+function initDesigner(templateJson) {
+  hiprint.init({ providers: [new labelProvider()] });
+  buildPalette();
+  hiprint.PrintElementTypeManager.buildByHtml($('.ep-draggable-item'));
+  hiprintTemplate = new hiprint.PrintTemplate({
+    template: templateJson,
+    settingContainer: '#PrintElementOptionSetting',
+  });
+  $('#design-canvas').empty();
+  hiprintTemplate.design('#design-canvas');
+}
+
+function placeholderData() {
+  const data = {};
+  FIELDS.forEach(f => { data[f.name] = '{{ ' + f.name + ' }}'; });
+  data.qr_code = '{{ qr_code }}';
+  return data;
+}
+
+function sampleData() {
+  const data = {};
+  FIELDS.forEach(f => { data[f.name] = f.sample; });
+  data.qr_code = QR_SAMPLE;
+  return data;
+}
+
+// hiprint 运行时注入到 head 的样式（排除本页面自身的 UI 样式），随模板一起保存，
+// 保证 Tera 渲染出的 HTML 脱离 hiprint 也能正常显示
+function collectHiprintCss() {
+  return $('head style').not('#designer-ui-style').map((i, el) => el.textContent).get().join('\n');
+}
+
+function buildTemplateHtml() {
+  let json = hiprintTemplate.getJson();
+  if (typeof json === 'string') json = JSON.parse(json);
+  const $html = hiprintTemplate.getHtml(placeholderData());
+  const panelHtml = $('<div>').append($html).html();
+  const panel = (json.panels && json.panels[0]) || {};
+  const width = panel.width || 150;
+  const height = panel.height || 80;
+  const doc = '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n'
+    + '<style>\nhtml, body { margin: 0; padding: 0; }\n'
+    + 'body { font-family: "Microsoft YaHei UI", sans-serif; font-weight: bold; }\n'
+    + '#app { position: relative; width: ' + width + 'mm; height: ' + height + 'mm; overflow: hidden; }\n'
+    + '</style>\n<style>\n' + collectHiprintCss() + '\n</style>\n</head>\n<body>\n'
+    + '<div id="app">' + panelHtml + '</div>\n</body>\n</html>';
+  return { json, html: doc };
+}
+
+$('#btn-save').on('click', async () => {
+  try {
+    const payload = buildTemplateHtml();
+    const resp = await fetch('/api/template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + await resp.text());
+    setStatus('已保存 ' + new Date().toLocaleTimeString());
+  } catch (e) {
+    setStatus('保存失败: ' + e.message, true);
+  }
+});
+
+$('#btn-preview').on('click', () => {
+  $('#preview-content').empty().append(hiprintTemplate.getHtml(sampleData()));
+  $('#preview-mask').fadeIn(100);
+});
+$('#preview-close, #preview-mask').on('click', e => {
+  if (e.target.id !== 'preview-content') $('#preview-mask').fadeOut(100);
+});
+
+$(async () => {
+  try {
+    const resp = await fetch('/api/template');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    initDesigner(await resp.json());
+    setStatus('已加载模板');
+  } catch (e) {
+    initDesigner({ panels: [{ index: 0, width: 150, height: 80, paperHeader: 0, paperFooter: 226.8, printElements: [] }] });
+    setStatus('未找到已保存模板，从空白标签开始', true);
+  }
+});
+</script>
+</body>
+</html>

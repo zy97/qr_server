@@ -10,7 +10,6 @@ use tracing::info;
 pub enum CustomError {
     #[error("OtherLibraryError: {0}")]
     OtherLibraryError(String),
-    #[cfg(feature = "typst")]
     #[error("JsonError: {0}")]
     JsonError(#[from] serde_json::Error),
     #[cfg(any(feature = "master", feature = "chrome", feature = "agent-browser"))]

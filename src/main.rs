@@ -1,5 +1,6 @@
 #[cfg(any(feature = "master", feature = "typst", feature = "chrome"))]
 mod config;
+mod designer;
 pub mod err;
 #[cfg(any(feature = "master", feature = "typst", feature = "chrome"))]
 mod print;
@@ -25,6 +26,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(middleware::Logger::default())
             .configure(routes::configure)
+            .configure(designer::configure)
     })
     .bind(("127.0.0.1", 9095))?
     .run()
