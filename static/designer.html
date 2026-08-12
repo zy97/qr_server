@@ -39,6 +39,8 @@
   <label style="font-size:13px">面板宽 <input id="panel-w" type="number" step="0.1" min="10" style="width:60px"> mm</label>
   <label style="font-size:13px">高 <input id="panel-h" type="number" step="0.1" min="10" style="width:60px"> mm</label>
   <button id="btn-panel">应用面板尺寸</button>
+  <label style="font-size:13px">前缀 <input id="affix-prefix" style="width:50px" disabled title="选中字段元素后可编辑"></label>
+  <label style="font-size:13px">后缀 <input id="affix-suffix" style="width:50px" disabled title="选中字段元素后可编辑，如：个"></label>
   <span id="status"></span>
 </div>
 <div id="main">
@@ -115,6 +117,8 @@ function buildPalette() {
       $palette.append($('<div class="ep-draggable-item"></div>').attr('tid', item.tid).text(item.title));
     });
   });
+  $palette.append($('<div style="padding:8px 4px;font-size:12px;color:#888;line-height:1.6"></div>')
+    .text('提示：固定文本内容或字段名里都可直接写占位符表达式，如 {{ count }}个，渲染时会替换成 100个；字段元素选中后也可在顶部加前后缀。'));
 }
 
 // 画布上字段元素显示 {{ 字段名 }} 占位符，直观看清绑定关系；
@@ -122,9 +126,45 @@ function buildPalette() {
 function applyFieldPlaceholders(designJson) {
   ((designJson && designJson.panels) || []).forEach(p => (p.printElements || []).forEach(el => {
     const o = el.options || {};
-    if (o.field && !o.testData) o.testData = '{{ ' + o.field + ' }}';
+    if (!o.field) return;
+    if (o.field.includes('{{')) o.testData = o.field;
+    else if (!o.testData) o.testData = '{{ ' + o.field + ' }}';
   }));
   return designJson;
+}
+
+// 字段前后缀：hiprint 的 formatter 以字符串形式存储（可随模板 JSON 持久化），
+// 渲染时由 hiprint eval 成函数；prefix/suffix 为普通字符串选项
+const AFFIX_FORMATTER = "function(title, value, options){ return (options.prefix || '') + (value == null ? '' : value) + (options.suffix || ''); }";
+
+let selectedElement = null;
+
+function bindAffixInputs() {
+  // 元素选中和取消选中事件
+  hinnn.event.on(hiprintTemplate.getPrintElementSelectEventKey(), (e) => {
+    const el = e.printElement;
+    const o = el && el.options;
+    if (o && o.field) {
+      selectedElement = el;
+      $('#affix-prefix').val(o.prefix || '').prop('disabled', false);
+      $('#affix-suffix').val(o.suffix || '').prop('disabled', false);
+    } else {
+      selectedElement = null;
+      $('#affix-prefix, #affix-suffix').val('').prop('disabled', true);
+    }
+  });
+  hinnn.event.on('clearSettingContainer', () => {
+    selectedElement = null;
+    $('#affix-prefix, #affix-suffix').val('').prop('disabled', true);
+  });
+  $('#affix-prefix, #affix-suffix').on('input', () => {
+    if (!selectedElement) return;
+    const o = selectedElement.options;
+    o.prefix = $('#affix-prefix').val();
+    o.suffix = $('#affix-suffix').val();
+    if (o.prefix || o.suffix) o.formatter = AFFIX_FORMATTER; else delete o.formatter;
+    selectedElement.updateDesignViewFromOptions();
+  });
 }
 
 function initDesigner(templateJson) {
@@ -138,12 +178,18 @@ function initDesigner(templateJson) {
   $('#design-canvas').empty();
   hiprintTemplate.design('#design-canvas');
   syncPanelSizeInputs();
+  bindAffixInputs();
 }
 
-function placeholderData() {
+function placeholderData(templateJson) {
   const data = {};
   FIELDS.forEach(f => { data[f.name] = '{{ ' + f.name + ' }}'; });
   data.qr_code = '{{ qr_code }}';
+  // 字段名直接写占位符表达式（如 {{ count }}个）：原样输出，由 Tera 渲染时替换
+  ((templateJson && templateJson.panels) || []).forEach(p => (p.printElements || []).forEach(el => {
+    const f = el.options && el.options.field;
+    if (f && f.includes('{{')) data[f] = f;
+  }));
   return data;
 }
 
@@ -179,7 +225,7 @@ function collectHiprintCss() {
 function buildTemplateHtml() {
   let json = hiprintTemplate.getJson();
   if (typeof json === 'string') json = JSON.parse(json);
-  const $html = hiprintTemplate.getHtml(placeholderData());
+  const $html = hiprintTemplate.getHtml(placeholderData(json));
   const $wrap = $('<div>').append($html);
   // 纯展示模板：去掉可聚焦属性（点击会出现焦点高亮框）和浏览器打印用的 @page 块
   $wrap.find('[tabindex]').removeAttr('tabindex');
