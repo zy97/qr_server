@@ -1,3 +1,4 @@
+mod child_cleanup;
 #[cfg(any(feature = "master", feature = "typst", feature = "chrome"))]
 mod config;
 mod designer;
@@ -12,6 +13,9 @@ use tracing_subscriber::{fmt::Layer, layer::SubscriberExt, FmtSubscriber};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // 服务退出时由 OS 连带终止子进程（chrome / typst watch），避免残留
+    #[cfg(windows)]
+    child_cleanup::setup_kill_on_close_job();
     let file_appender = tracing_appender::rolling::daily("logs", "app.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
