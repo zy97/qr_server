@@ -33,7 +33,7 @@
 </head>
 <body>
 <div id="toolbar">
-  <strong>标签模板设计器</strong>
+  <strong>标签模板设计器</strong><span id="tpl-name" style="font-size:13px;color:#9fc3e8"></span><a href="/templates" style="color:#9fc3e8;font-size:13px">模板管理</a>
   <button id="btn-save">保存模板</button>
   <button id="btn-preview">预览（示例数据）</button>
   <label style="font-size:13px">面板宽 <input id="panel-w" type="number" step="0.1" min="10" style="width:60px"> mm</label>
@@ -170,8 +170,8 @@ function buildTemplateHtml() {
 $('#btn-save').on('click', async () => {
   try {
     const payload = buildTemplateHtml();
-    const resp = await fetch('/api/template', {
-      method: 'POST',
+    const resp = await fetch('/api/templates/' + templateId, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
@@ -206,15 +206,19 @@ $('#preview-close, #preview-mask').on('click', e => {
   if (e.target.id !== 'preview-content') $('#preview-mask').fadeOut(100);
 });
 
+const templateId = new URLSearchParams(location.search).get('id') || 'default';
+
 $(async () => {
   try {
-    const resp = await fetch('/api/template');
+    const resp = await fetch('/api/templates/' + templateId);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    initDesigner(await resp.json());
+    const record = await resp.json();
+    $('#tpl-name').text('— ' + record.name + (record.is_default ? '（默认）' : ''));
+    initDesigner(record.design_json);
     setStatus('已加载模板');
   } catch (e) {
-    initDesigner({ panels: [{ index: 0, width: 150, height: 80, paperHeader: 0, paperFooter: 226.8, printElements: [] }] });
-    setStatus('未找到已保存模板，从空白标签开始', true);
+    initDesigner({ panels: [{ index: 0, width: 150, height: 70, paperHeader: 0, paperFooter: 198.4, paperNumberDisabled: true, printElements: [] }] });
+    setStatus('模板加载失败，从空白标签开始', true);
   }
 });
 </script>

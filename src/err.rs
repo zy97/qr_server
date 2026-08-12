@@ -12,6 +12,8 @@ pub enum CustomError {
     OtherLibraryError(String),
     #[error("JsonError: {0}")]
     JsonError(#[from] serde_json::Error),
+    #[error("DbError: {0}")]
+    DbError(#[from] rusqlite::Error),
     #[cfg(any(feature = "master", feature = "chrome", feature = "agent-browser"))]
     #[error("QrError: {0}")]
     QrError(#[from] QrError),

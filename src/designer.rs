@@ -1,32 +1,47 @@
-use actix_web::{get, post, web, HttpResponse, Responder};
+//! 模板设计器与管理页面的 HTTP 接口：
+//! - 页面：GET /designer（拖拽设计）、GET /templates（模板管理）
+//! - 静态资源：GET /designer/vendor/{file}（vendored hiprint 及依赖）
+//! - 模板 API：/api/templates 增删查改、复制、设默认；默认模板渲染 HTML
+//!   由 template_store 同步到 templates/template.html，供渲染分支按文件加载
+use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
 use serde::Deserialize;
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Mutex,
 };
 
 use crate::err::CustomError;
+use crate::template_store as store;
 
 const STATIC_DIR: &str = "static";
-const TEMPLATE_DIR: &str = "templates";
-const TEMPLATE_JSON_FILE: &str = "label_template.json";
-const TEMPLATE_HTML_FILE: &str = "template.html";
-
-/// 模板保存串行化，避免并发请求写坏文件
-static SAVE_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(designer_page)
+        .service(manager_page)
         .service(designer_asset)
+        .service(list_templates)
+        .service(create_template)
         .service(get_template)
-        .service(save_template);
+        .service(update_template)
+        .service(delete_template)
+        .service(copy_template)
+        .service(set_default_template);
 }
 
-/// 标签模板设计器页面（hiprint 拖拽设计）
+/// 标签模板设计器页面（hiprint 拖拽设计），?id=N 编辑指定模板，缺省编辑默认模板
 #[get("/designer")]
 async fn designer_page() -> Result<impl Responder, CustomError> {
-    let html = fs::read_to_string(static_path("designer.html"))?;
+    serve_static_page("designer.html")
+}
+
+/// 模板管理页面（列表/新建/复制/设默认/删除）
+#[get("/templates")]
+async fn manager_page() -> Result<impl Responder, CustomError> {
+    serve_static_page("manager.html")
+}
+
+fn serve_static_page(name: &str) -> Result<HttpResponse, CustomError> {
+    let html = fs::read_to_string(Path::new(STATIC_DIR).join(name))?;
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(html))
@@ -47,64 +62,100 @@ async fn designer_asset(path: web::Path<String>) -> Result<impl Responder, Custo
         .body(bytes))
 }
 
-/// 读取 hiprint 模板 JSON（设计器打开时回显）
-#[get("/api/template")]
-async fn get_template() -> Result<impl Responder, CustomError> {
-    let json = fs::read_to_string(template_path(TEMPLATE_JSON_FILE))?;
-    Ok(HttpResponse::Ok()
-        .content_type("application/json; charset=utf-8")
-        .body(json))
+/// 模板列表
+#[get("/api/templates")]
+async fn list_templates() -> Result<impl Responder, CustomError> {
+    let list = store::with_db(|conn| store::list(conn))?;
+    Ok(HttpResponse::Ok().json(list))
 }
 
 #[derive(Deserialize)]
-pub struct SaveTemplateRequest {
-    /// hiprint 设计器导出的模板 JSON（设计源文件，供下次继续编辑）
-    json: serde_json::Value,
-    /// 由 hiprint getHtml(占位符数据) 生成的完整 HTML（Tera 渲染产物）
-    html: String,
+pub struct CreateTemplateRequest {
+    name: String,
 }
 
-/// 保存模板：同时写入设计源 JSON 和渲染用 HTML
-#[post("/api/template")]
-async fn save_template(
-    body: web::Json<SaveTemplateRequest>,
+/// 新建空白模板
+#[post("/api/templates")]
+async fn create_template(
+    body: web::Json<CreateTemplateRequest>,
 ) -> Result<impl Responder, CustomError> {
-    let _guard = SAVE_LOCK
-        .lock()
-        .map_err(|_| CustomError::OtherLibraryError("template save lock poisoned".to_string()))?;
-    save_template_files(Path::new(TEMPLATE_DIR), &body)?;
+    let id = store::with_db(|conn| store::create(conn, &body.name))?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "id": id })))
+}
+
+/// 读取模板（id 为 "default" 时返回默认模板，设计器回显用）
+#[get("/api/templates/{id}")]
+async fn get_template(path: web::Path<String>) -> Result<impl Responder, CustomError> {
+    let id = parse_template_id(&path.into_inner())?;
+    let record = store::with_db(|conn| store::get(conn, id))?;
+    Ok(HttpResponse::Ok().json(record))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTemplateRequest {
+    /// 模板名称（可选）
+    name: Option<String>,
+    /// hiprint 设计器导出的模板 JSON（设计源文件，供下次继续编辑）
+    json: Option<serde_json::Value>,
+    /// 由 hiprint getHtml(占位符数据) 生成的完整 HTML（Tera 渲染产物）
+    html: Option<String>,
+}
+
+/// 保存模板（改名 / 保存设计）
+#[put("/api/templates/{id}")]
+async fn update_template(
+    path: web::Path<String>,
+    body: web::Json<UpdateTemplateRequest>,
+) -> Result<impl Responder, CustomError> {
+    // "default" 解析为当前默认模板的实际 id
+    let id = match parse_template_id(&path.into_inner())? {
+        Some(id) => id,
+        None => store::with_db(|conn| store::get(conn, None))?.id,
+    };
+    store::with_db(|conn| {
+        store::update(
+            conn,
+            id,
+            body.name.as_deref(),
+            body.json.as_ref(),
+            body.html.as_deref(),
+        )
+    })?;
+    // 若保存的是默认模板，把最新渲染 HTML 同步到 template.html
+    store::with_db(|conn| store::sync_render_file(conn))?;
     Ok(HttpResponse::Ok().finish())
 }
 
-fn save_template_files(dir: &Path, req: &SaveTemplateRequest) -> Result<(), CustomError> {
-    if !req
-        .json
-        .get("panels")
-        .map(|p| p.is_array())
-        .unwrap_or(false)
-    {
-        return Err(CustomError::OtherLibraryError(
-            "模板 JSON 缺少 panels 数组".to_string(),
-        ));
-    }
-    if !req.html.contains("id=\"app\"") {
-        return Err(CustomError::OtherLibraryError(
-            "模板 HTML 缺少 #app 容器".to_string(),
-        ));
-    }
-    let json = serde_json::to_string_pretty(&req.json)
-        .map_err(|e| CustomError::OtherLibraryError(format!("模板 JSON 序列化失败: {e}")))?;
-    write_atomic(&dir.join(TEMPLATE_JSON_FILE), json.as_bytes())?;
-    write_atomic(&dir.join(TEMPLATE_HTML_FILE), req.html.as_bytes())?;
-    Ok(())
+/// 删除模板；默认模板不可删除
+#[delete("/api/templates/{id}")]
+async fn delete_template(path: web::Path<i64>) -> Result<impl Responder, CustomError> {
+    store::with_db(|conn| store::delete(conn, path.into_inner()))?;
+    Ok(HttpResponse::Ok().finish())
 }
 
-/// 先写临时文件再重命名，避免渲染中途读到写了一半的模板
-fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), CustomError> {
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, contents)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+/// 一键复制模板
+#[post("/api/templates/{id}/copy")]
+async fn copy_template(path: web::Path<i64>) -> Result<impl Responder, CustomError> {
+    let id = store::with_db(|conn| store::copy(conn, path.into_inner()))?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "id": id })))
+}
+
+/// 设为默认模板（/label 渲染用）
+#[post("/api/templates/{id}/default")]
+async fn set_default_template(path: web::Path<i64>) -> Result<impl Responder, CustomError> {
+    store::with_db(|conn| store::set_default(conn, path.into_inner()))?;
+    store::with_db(|conn| store::sync_render_file(conn))?;
+    Ok(HttpResponse::Ok().finish())
+}
+
+/// "default" -> None（默认模板），否则解析数字 id
+fn parse_template_id(raw: &str) -> Result<Option<i64>, CustomError> {
+    if raw == "default" {
+        return Ok(None);
+    }
+    raw.parse::<i64>()
+        .map(Some)
+        .map_err(|_| CustomError::OtherLibraryError(format!("invalid template id: {raw}")))
 }
 
 fn is_safe_asset_name(filename: &str) -> bool {
@@ -132,64 +183,15 @@ fn static_path(name: &str) -> PathBuf {
     Path::new(STATIC_DIR).join(name)
 }
 
-fn template_path(name: &str) -> PathBuf {
-    Path::new(TEMPLATE_DIR).join(name)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "qr_service_designer_test_{}_{}",
-            std::process::id(),
-            tag
-        ));
-        fs::create_dir_all(&dir).expect("create temp dir");
-        dir
-    }
-
-    fn sample_request() -> SaveTemplateRequest {
-        SaveTemplateRequest {
-            json: serde_json::json!({"panels": [{"width": 150, "height": 80, "printElements": []}]}),
-            html: "<html><body><div id=\"app\">{{ part_no }}</div></body></html>".to_string(),
-        }
-    }
-
     #[test]
-    fn saves_template_json_and_html_atomically() {
-        let dir = temp_dir("save");
-        save_template_files(&dir, &sample_request()).expect("save template files");
-
-        let json = fs::read_to_string(dir.join(TEMPLATE_JSON_FILE)).expect("read json");
-        assert!(json.contains("\"panels\""));
-        let html = fs::read_to_string(dir.join(TEMPLATE_HTML_FILE)).expect("read html");
-        assert!(html.contains("{{ part_no }}"));
-        // 临时文件不应残留
-        assert!(!dir.join("label_template.tmp").exists());
-        assert!(!dir.join("template.tmp").exists());
-    }
-
-    #[test]
-    fn rejects_template_without_panels() {
-        let dir = temp_dir("no_panels");
-        let mut req = sample_request();
-        req.json = serde_json::json!({"foo": 1});
-
-        let err = save_template_files(&dir, &req).expect_err("should reject");
-        assert!(matches!(err, CustomError::OtherLibraryError(_)));
-        assert!(!dir.join(TEMPLATE_HTML_FILE).exists());
-    }
-
-    #[test]
-    fn rejects_html_without_app_container() {
-        let dir = temp_dir("no_app");
-        let mut req = sample_request();
-        req.html = "<html><body></body></html>".to_string();
-
-        let err = save_template_files(&dir, &req).expect_err("should reject");
-        assert!(matches!(err, CustomError::OtherLibraryError(_)));
+    fn parses_template_id() {
+        assert_eq!(parse_template_id("default").expect("default"), None);
+        assert_eq!(parse_template_id("42").expect("numeric"), Some(42));
+        assert!(parse_template_id("abc").is_err());
     }
 
     #[test]

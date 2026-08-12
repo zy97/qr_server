@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>标签模板管理</title>
+<style>
+  body { margin: 0; font-family: "Microsoft YaHei UI", sans-serif; background: #f0f2f5; }
+  #toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #2d3a4a; color: #fff; }
+  #toolbar button { padding: 6px 18px; font-size: 14px; cursor: pointer; border: 0; border-radius: 4px; background: #4a90d9; color: #fff; }
+  #toolbar button:hover { background: #357ab8; }
+  #status { margin-left: auto; font-size: 13px; }
+  #content { padding: 20px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  th, td { padding: 10px 14px; border-bottom: 1px solid #eee; text-align: left; font-size: 14px; }
+  th { background: #fafafa; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #52c41a; color: #fff; }
+  .actions button { margin-right: 6px; padding: 4px 12px; font-size: 13px; cursor: pointer; border: 1px solid #d0d0d0; border-radius: 4px; background: #fff; }
+  .actions button:hover { border-color: #4a90d9; color: #4a90d9; }
+  .actions button.danger:hover { border-color: #e33; color: #e33; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <strong>标签模板管理</strong>
+  <button id="btn-new">新建模板</button>
+  <span id="status"></span>
+</div>
+<div id="content">
+  <table>
+    <thead><tr><th style="width:60px">ID</th><th>名称</th><th style="width:90px">状态</th><th style="width:180px">更新时间</th><th style="width:340px">操作</th></tr></thead>
+    <tbody id="tpl-list"></tbody>
+  </table>
+</div>
+<script>
+function setStatus(msg, isError) {
+  document.querySelector('#status').textContent = msg;
+  document.querySelector('#status').style.color = isError ? '#ff9d9d' : '#9de69d';
+}
+
+async function api(method, url, body) {
+  const resp = await fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + await resp.text());
+  return resp.status === 204 ? null : resp.json().catch(() => null);
+}
+
+async function loadList() {
+  const list = await api('GET', '/api/templates');
+  const tbody = document.querySelector('#tpl-list');
+  tbody.innerHTML = '';
+  for (const t of list) {
+    const tr = document.createElement('tr');
+    const time = new Date(t.updated_at * 1000).toLocaleString('zh-CN', { hour12: false });
+    tr.innerHTML =
+      '<td>' + t.id + '</td>' +
+      '<td></td>' +
+      '<td>' + (t.is_default ? '<span class="badge">默认</span>' : '') + '</td>' +
+      '<td>' + time + '</td>' +
+      '<td class="actions"></td>';
+    tr.children[1].textContent = t.name;
+    const actions = tr.querySelector('.actions');
+
+    const btnEdit = document.createElement('button');
+    btnEdit.textContent = '编辑';
+    btnEdit.onclick = () => { location.href = '/designer?id=' + t.id; };
+    actions.appendChild(btnEdit);
+
+    const btnCopy = document.createElement('button');
+    btnCopy.textContent = '复制';
+    btnCopy.onclick = () => run('已复制', () => api('POST', '/api/templates/' + t.id + '/copy'));
+    actions.appendChild(btnCopy);
+
+    const btnRename = document.createElement('button');
+    btnRename.textContent = '改名';
+    btnRename.onclick = async () => {
+      const name = prompt('新名称：', t.name);
+      if (name && name.trim()) await run('已改名', () => api('PUT', '/api/templates/' + t.id, { name: name.trim() }));
+    };
+    actions.appendChild(btnRename);
+
+    if (!t.is_default) {
+      const btnDefault = document.createElement('button');
+      btnDefault.textContent = '设为默认';
+      btnDefault.onclick = () => run('已设为默认模板', () => api('POST', '/api/templates/' + t.id + '/default'));
+      actions.appendChild(btnDefault);
+
+      const btnDel = document.createElement('button');
+      btnDel.textContent = '删除';
+      btnDel.className = 'danger';
+      btnDel.onclick = async () => {
+        if (confirm('确定删除模板「' + t.name + '」？')) {
+          await run('已删除', () => api('DELETE', '/api/templates/' + t.id));
+        }
+      };
+      actions.appendChild(btnDel);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+async function run(okMsg, action) {
+  try {
+    await action();
+    setStatus(okMsg);
+    await loadList();
+  } catch (e) {
+    setStatus('操作失败: ' + e.message, true);
+  }
+}
+
+document.querySelector('#btn-new').onclick = async () => {
+  const name = prompt('新模板名称：', '新标签模板');
+  if (!name || !name.trim()) return;
+  try {
+    const created = await api('POST', '/api/templates', { name: name.trim() });
+    location.href = '/designer?id=' + created.id;
+  } catch (e) {
+    setStatus('新建失败: ' + e.message, true);
+  }
+};
+
+loadList().catch(e => setStatus('加载失败: ' + e.message, true));
+</script>
+</body>
+</html>

@@ -4,3 +4,4 @@ templates/qr.png
 ./templates/qr.png
 result.png
 logs/*
+templates/templates.db
