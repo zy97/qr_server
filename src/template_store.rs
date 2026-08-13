@@ -107,14 +107,27 @@ fn seed_default(
     Ok(())
 }
 
-/// 把默认模板的渲染 HTML 写入 templates/template.html（渲染分支按文件加载）。
-/// 只应由路由层/启动流程调用；单元测试用内存库，不得触碰真实文件
+/// 把默认模板的渲染 HTML 写入 templates/template.html（仅供本地查看，受 [template] save_html 控制）。
+/// 只应由路由层/启动流程调用；单元测试用内存库，不得触碰真实文件。渲染以数据库为准
 pub fn sync_render_file(conn: &Connection) -> Result<(), CustomError> {
+    if !crate::config::CONFIG.template.save_html {
+        return Ok(());
+    }
     let html: String = conn.query_row(
         "SELECT render_html FROM templates WHERE is_default = 1",
         [],
         |r| r.get(0),
     )?;
+    fs::write(Path::new(TEMPLATE_DIR).join(RENDER_HTML_FILE), html)?;
+    Ok(())
+}
+
+/// 把指定渲染 HTML 落地到 templates/template.html（仅供本地查看，受 [template] save_html 控制）。
+/// 渲染已走数据库，此文件只是查看用；保存模板时写入被保存模板的内容
+pub fn write_render_file(html: &str) -> Result<(), CustomError> {
+    if !crate::config::CONFIG.template.save_html {
+        return Ok(());
+    }
     fs::write(Path::new(TEMPLATE_DIR).join(RENDER_HTML_FILE), html)?;
     Ok(())
 }
@@ -267,6 +280,31 @@ pub fn delete(conn: &Connection, id: i64) -> Result<(), CustomError> {
     Ok(())
 }
 
+/// 渲染用模板 HTML：selector 为空用默认模板；数字按 id、其它按名称（取最近更新的一条）
+pub fn render_html_for(conn: &Connection, selector: Option<&str>) -> Result<String, CustomError> {
+    let row = |sql: &str, p: Option<String>| -> Result<String, CustomError> {
+        conn.query_row(sql, rusqlite::params_from_iter(p.iter()), |r| r.get(0))
+            .map_err(CustomError::from)
+    };
+    match selector {
+        None => row("SELECT render_html FROM templates WHERE is_default = 1", None),
+        Some(s) if s.parse::<i64>().is_ok() => {
+            row("SELECT render_html FROM templates WHERE id = ?1", Some(s.to_string()))
+        }
+        Some(s) => row(
+            "SELECT render_html FROM templates WHERE name = ?1 ORDER BY updated_at DESC LIMIT 1",
+            Some(s.to_string()),
+        ),
+    }
+    .map_err(|e| match e {
+        CustomError::DbError(_) => {
+            CustomError::OtherLibraryError(format!("模板不存在: {}", selector.unwrap_or("<default>")))
+        }
+        other => other,
+    })
+}
+
+
 /// 供路由层使用的全局连接
 pub fn with_db<T>(f: impl FnOnce(&Connection) -> Result<T, CustomError>) -> Result<T, CustomError> {
     f(&lock_db())
@@ -334,6 +372,24 @@ mod tests {
         delete(&conn, copied_id).expect("delete");
         assert_eq!(list(&conn).expect("list").len(), 2);
     }
+    #[test]
+    fn render_html_for_selects_by_id_name_and_default() {
+        let conn = test_conn();
+        seed_test_default(&conn);
+        let new_id = create(&conn, "新模板").expect("create");
+        let default = get(&conn, None).expect("default");
+
+        assert!(render_html_for(&conn, None).expect("default").contains("{{ part_no }}"));
+        assert_eq!(
+            render_html_for(&conn, Some(&default.id.to_string())).expect("by id"),
+            render_html_for(&conn, None).expect("default")
+        );
+        assert!(render_html_for(&conn, Some("新模板")).expect("by name").contains("id=\"app\""));
+        assert!(render_html_for(&conn, Some("9999")).is_err());
+        assert!(render_html_for(&conn, Some("不存在")).is_err());
+        let _ = new_id;
+    }
+
 
     #[test]
     fn default_template_cannot_be_deleted() {

@@ -10,3 +10,7 @@ printer_name = "Microsoft Print to PDF"
 # 自定义纸张尺寸（cm），与原 C# 打印服务一致
 paper_width = 10.57
 paper_height = 29.70
+
+[template]
+# 保存模板时是否把渲染 HTML 落地到 templates/template.html（仅供本地查看，渲染以数据库为准）
+save_html = true

@@ -63,7 +63,7 @@
 <div id="preview-mask">
   <div id="preview-box">
     <div>
-      <div style="font-size:13px;margin-bottom:6px">预览数据（POST /label?print=false，qr_string 分段：物料编码|批次号|订单号|数量|供应商|日期|箱号）：</div>
+      <div style="font-size:13px;margin-bottom:6px">预览数据（POST /label?print=false&template=当前模板，qr_string 分段：物料编码|批次号|订单号|数量|供应商|日期|箱号）：</div>
       <textarea id="preview-json" style="width:380px;height:280px;font-family:Consolas,monospace;font-size:12px"></textarea>
       <div id="preview-fields" style="font-size:12px;color:#888;margin-top:6px;max-width:380px"></div>
       <div style="margin-top:8px">
@@ -125,12 +125,17 @@ function setStatus(msg, isError) {
   $('#status').text(msg).css('color', isError ? '#ff9d9d' : '#9de69d');
 }
 
+// 字段的展示形式：纯字段名显示为 {{ name }}，表达式原样显示
+function displayFieldName(name) {
+  return name.includes('{{') ? name : '{{ ' + name + ' }}';
+}
+
 function fieldPaletteItem(f) {
   // flex 布局：文本超长省略号，按钮固定右侧不换行
   const $item = $('<div class="ep-draggable-item" style="display:flex;align-items:center;gap:2px"></div>')
     .attr('tid', 'labelModule.' + f.name)
     .append($('<span class="field-label" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>')
-      .text(f.title + '（' + f.name + '）'));
+      .text(f.title + '（' + displayFieldName(f.name) + '）'));
   const $actions = $('<span style="white-space:nowrap"></span>');
   // 注意用 mousedown 拦截：hidraggable 会在拖拽开始时吞掉 click/dblclick
   const mkBtn = (text, title, color) => $('<span style="cursor:pointer;padding:0 3px"></span>')
@@ -223,7 +228,7 @@ function submitFieldEditor() {
     f.name = name;
     f.title = title;
     $item.attr('tid', 'labelModule.' + name);
-    $item.find('.field-label').text(f.title + '（' + f.name + '）');
+    $item.find('.field-label').text(f.title + '（' + displayFieldName(f.name) + '）');
     if (nameChanged) {
       registerFieldType(f);
       hiprint.PrintElementTypeManager.buildByHtml($item);
@@ -464,14 +469,37 @@ function placeholderData(templateJson) {
 // 预览直接调 /label 走真实渲染链路；请求体即 LabelInfo，用户可自由编辑，
 // 上次编辑内容存 localStorage
 const PREVIEW_STORAGE_KEY = 'qr_designer_preview_json';
-const DEFAULT_PREVIEW_DATA = {
-  kind: 0,
-  customer_name: '某某客户有限公司',
-  part_no: 'W4515654841155',
-  material_name: 'LQFC-0',
+// 常见字段的示例值；未收录的字段用字段名本身作示例
+const FIELD_SAMPLES = {
   qr_string: '479927000140|240514A634|ASN240515000367|100|V001|2024-08-21|900001',
-  is_return: false,
+  part_no: 'W4515654841155',
+  material_no: '479927000140',
+  material_name: 'LQFC-0',
+  box_no: '900001',
+  order_no: 'ASN240515000367',
+  count: '100',
+  lot_no: '240514A634',
+  date: '2024-08-21',
+  customer_name: '某某客户有限公司',
+  is_return: true,
 };
+
+// 按当前模板实际使用的字段生成预览数据：
+// 普通字段直接用；表达式（如 {{ qr_string | [0] }}、{{ is_return ? "回" : "" }}）反推其引用的基础字段；
+// 二维码元素（qr_code）需要 qr_string
+function buildPreviewData() {
+  const data = {};
+  collectUsedFields().forEach(f => {
+    let key = f;
+    if (f.includes('{{')) {
+      const m = f.match(/([A-Za-z_]\w*)/);
+      key = m ? m[1] : null;
+    }
+    if (key === 'qr_code') key = 'qr_string';
+    if (key && !(key in data)) data[key] = key in FIELD_SAMPLES ? FIELD_SAMPLES[key] : key;
+  });
+  return data;
+}
 
 // 提取当前模板实际用到的字段（字段绑定 + 文本内容里的 {{ }} 表达式）
 function collectUsedFields() {
@@ -496,10 +524,12 @@ async function renderPreview() {
     $status.text('JSON 格式错误: ' + e.message);
     return;
   }
-  localStorage.setItem(PREVIEW_STORAGE_KEY, $('#preview-json').val());
+  localStorage.setItem(PREVIEW_STORAGE_KEY + '_' + templateId, $('#preview-json').val());
   $status.css('color', '#888').text('渲染中…');
   try {
-    const resp = await fetch('/label?print=false', {
+    // 渲染当前编辑的模板（?template= 指定 id；默认模板无需参数）
+    const url = '/label?print=false' + (templateId === 'default' ? '' : '&template=' + encodeURIComponent(templateId));
+    const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify([label]),
@@ -597,8 +627,8 @@ $('#btn-panel').on('click', () => {
   setStatus('面板已调整为 ' + w + 'mm × ' + h + 'mm，保存后生效');
 });
 $('#btn-preview').on('click', () => {
-  $('#preview-json').val(localStorage.getItem(PREVIEW_STORAGE_KEY) || JSON.stringify(DEFAULT_PREVIEW_DATA, null, 2));
-  $('#preview-fields').text('当前模板使用字段：' + (collectUsedFields().join('、') || '（无）'));
+  $('#preview-json').val(localStorage.getItem(PREVIEW_STORAGE_KEY + '_' + templateId) || JSON.stringify(buildPreviewData(), null, 2));
+  $('#preview-fields').text('当前模板使用字段：' + (collectUsedFields().map(displayFieldName).join('、') || '（无）'));
   $('#preview-mask').fadeIn(100);
   renderPreview();
 });

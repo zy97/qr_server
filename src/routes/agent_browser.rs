@@ -14,11 +14,17 @@ use tracing::info;
 
 use crate::err::CustomError;
 
-/// 每次请求重新从磁盘加载模板：设计器保存 template.html 后无需重启即可生效
-/// （解析约 150KB，毫秒级，相对浏览器截图耗时可忽略）
-fn load_templates() -> Result<Tera, CustomError> {
+/// 每次请求从数据库读取默认模板的渲染 HTML 构建 Tera：
+/// 设计器保存/切换默认模板后立即生效（解析毫秒级，相对浏览器截图耗时可忽略）
+fn load_templates(selector: Option<&str>) -> Result<(Tera, String), CustomError> {
+    let html = crate::template_store::with_db(|conn| crate::template_store::render_html_for(conn, selector))?;
+    let tera = templates_from_html(&html)?;
+    Ok((tera, html))
+}
+
+fn templates_from_html(html: &str) -> Result<Tera, CustomError> {
     let mut tera = Tera::new();
-    tera.add_template_file("templates/template.html", Some("template.html"))?;
+    tera.add_raw_template("template.html", html)?;
     tera.autoescape_on(vec![".html", ".sql"]);
     Ok(tera)
 }
@@ -27,9 +33,16 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
 }
 
+/// /label 查询参数：template 指定渲染模板（id 或名称），缺省用默认模板
+#[derive(serde::Deserialize)]
+pub struct LabelQuery {
+    template: Option<String>,
+}
+
 #[post("/label")]
 async fn create_label(
     labels: web::Json<Vec<serde_json::Value>>,
+    query: web::Query<LabelQuery>,
 ) -> Result<impl Responder, CustomError> {
     // 整个图片渲染时间大致在200-300ms附近跳动
     let request_started = Instant::now();
@@ -42,10 +55,9 @@ async fn create_label(
         .ok_or_else(|| CustomError::OtherLibraryError("invalid agent-browser path".to_string()))?;
     let mut result_image = None;
 
-    let templates = load_templates()?;
+    let (templates, template_html) = load_templates(query.template.as_deref())?;
     for label in labels {
         let render_started = Instant::now();
-        let template_html = std::fs::read_to_string("templates/template.html")?;
         let context = build_template_context(&label, &template_html)?;
 
         let rendered = templates.render("template.html", &context)?;
@@ -118,16 +130,12 @@ fn build_template_context(
     label: &serde_json::Value,
     template_html: &str,
 ) -> Result<Context, CustomError> {
+    // qr_string 非必填：缺失时分段字段留空、qr_code 置空（新模板/预览可能没有）；
+    // 提供了但不足 7 段才视为数据错误
     let qr_string = label
         .get("qr_string")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| CustomError::OtherLibraryError("missing qr_string".to_string()))?;
-    let parts: Vec<&str> = qr_string.split('|').collect();
-    if parts.len() < 7 {
-        return Err(CustomError::OtherLibraryError(format!(
-            "qr_string 分段不足（需要 7 段）: {qr_string}"
-        )));
-    }
+        .unwrap_or_default();
     let mut map = serde_json::Map::new();
     if let Some(obj) = label.as_object() {
         for (key, value) in obj {
@@ -137,26 +145,35 @@ fn build_template_context(
             }
         }
     }
-    // qr_string 分段是这些字段的权威来源
-    for (key, value) in [
-        ("material_no", parts[0]),
-        ("lot_no", parts[1]),
-        ("order_no", parts[2]),
-        ("count", parts[3]),
-        ("vender_code", parts[4]),
-        ("date", parts[5]),
-        ("box_no", parts[6]),
-    ] {
-        map.insert(
-            key.to_string(),
-            serde_json::Value::String(value.to_string()),
-        );
+    if !qr_string.is_empty() {
+        let parts: Vec<&str> = qr_string.split('|').collect();
+        if parts.len() < 7 {
+            return Err(CustomError::OtherLibraryError(format!(
+                "qr_string 分段不足（需要 7 段）: {qr_string}"
+            )));
+        }
+        // qr_string 分段是这些字段的权威来源
+        for (key, value) in [
+            ("material_no", parts[0]),
+            ("lot_no", parts[1]),
+            ("order_no", parts[2]),
+            ("count", parts[3]),
+            ("vender_code", parts[4]),
+            ("date", parts[5]),
+            ("box_no", parts[6]),
+        ] {
+            map.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+        }
     }
     apply_split_variables(&mut map, template_html);
     fill_missing_variables(&mut map, template_html);
 
     let mut context = Context::from_serialize(&serde_json::Value::Object(map))?;
-    context.insert("qr_code", &qr_code_data_uri(qr_string)?);
+    if qr_string.is_empty() {
+        context.insert("qr_code", &"");
+    } else {
+        context.insert("qr_code", &qr_code_data_uri(qr_string)?);
+    }
     Ok(context)
 }
 
@@ -307,10 +324,12 @@ mod tests {
         )
         .expect("build context");
 
-        let rendered = load_templates()
-            .expect("load templates")
-            .render("template.html", &context)
-            .expect("agent-browser template should render with template data");
+        let rendered = templates_from_html(
+            &std::fs::read_to_string("templates/template.html").expect("read template"),
+        )
+        .expect("build templates")
+        .render("template.html", &context)
+        .expect("agent-browser template should render with template data");
 
         // 与 main.typ 一致的动态字段都应渲染出来
         assert!(rendered.contains("P-001"));
@@ -422,10 +441,12 @@ mod tests {
             &std::fs::read_to_string("templates/template.html").expect("read template"),
         )
         .expect("build context");
-        let rendered = load_templates()
-            .expect("load templates")
-            .render("template.html", &context)
-            .expect("agent-browser template should render");
+        let rendered = templates_from_html(
+            &std::fs::read_to_string("templates/template.html").expect("read template"),
+        )
+        .expect("build templates")
+        .render("template.html", &context)
+        .expect("agent-browser template should render");
 
         // 模板中 QR 图片必须渲染为 qr_code data URI
         assert!(rendered.contains("src=\"data:image/png;base64,"));

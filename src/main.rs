@@ -1,5 +1,4 @@
 mod child_cleanup;
-#[cfg(any(feature = "typst", feature = "chrome"))]
 mod config;
 mod designer;
 pub mod err;

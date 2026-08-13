@@ -8,6 +8,27 @@ use tracing::warn;
 pub struct Config {
     #[serde(default)]
     pub print: PrintConfig,
+    #[serde(default)]
+    pub template: TemplateConfig,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Deserialize)]
+pub struct TemplateConfig {
+    /// 保存模板时是否把渲染 HTML 落地到 templates/template.html（仅供本地查看，渲染以数据库为准）
+    #[serde(default = "default_true")]
+    pub save_html: bool,
+}
+
+impl Default for TemplateConfig {
+    fn default() -> Self {
+        Self {
+            save_html: default_true(),
+        }
+    }
 }
 
 /// 以下默认值来自原 C# 打印服务的生产配置
@@ -65,6 +86,13 @@ pub static CONFIG: LazyLock<Config> =
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn template_save_html_defaults_true_and_parses() {
+        let config: Config = toml::from_str("").unwrap();
+        assert!(config.template.save_html);
+        let config: Config = toml::from_str("[template]\nsave_html = false").unwrap();
+        assert!(!config.template.save_html);
+    }
 
     #[test]
     fn parse_print_config() {

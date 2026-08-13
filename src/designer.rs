@@ -121,8 +121,10 @@ async fn update_template(
             body.html.as_deref(),
         )
     })?;
-    // 若保存的是默认模板，把最新渲染 HTML 同步到 template.html
-    store::with_db(|conn| store::sync_render_file(conn))?;
+    // 落地文件仅供本地查看：写被保存模板自己的渲染 HTML（渲染以数据库为准）
+    if let Some(html) = body.html.as_deref() {
+        store::write_render_file(html)?;
+    }
     Ok(HttpResponse::Ok().finish())
 }
 
