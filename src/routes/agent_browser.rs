@@ -2,7 +2,6 @@ use actix_web::{post, web, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine};
 use image::{DynamicImage, ImageFormat, Luma};
 use qrcode::QrCode;
-use serde::Serialize;
 use std::{
     env, fs,
     io::Cursor,
@@ -14,7 +13,6 @@ use tera::{Context, Tera};
 use tracing::info;
 
 use crate::err::CustomError;
-use crate::requests::dtos::create_lable_dto::LabelInfo;
 
 /// 每次请求重新从磁盘加载模板：设计器保存 template.html 后无需重启即可生效
 /// （解析约 150KB，毫秒级，相对浏览器截图耗时可忽略）
@@ -30,7 +28,9 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 }
 
 #[post("/label")]
-async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
+async fn create_label(
+    labels: web::Json<Vec<serde_json::Value>>,
+) -> Result<impl Responder, CustomError> {
     // 整个图片渲染时间大致在200-300ms附近跳动
     let request_started = Instant::now();
     let labels = labels.into_inner();
@@ -45,10 +45,14 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
     let templates = load_templates()?;
     for label in labels {
         let render_started = Instant::now();
-        let mut infos = split_info(&label.qr_string, &label);
-        infos.qr_code = Some(qr_code_data_uri(&label.qr_string)?);
+        let qr_string = label
+            .get("qr_string")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| CustomError::OtherLibraryError("missing qr_string".to_string()))?;
+        let mut context = build_template_context(qr_string, &label)?;
+        context.insert("qr_code", &qr_code_data_uri(qr_string)?);
 
-        let rendered = templates.render("template.html", &Context::from_serialize(&infos)?)?;
+        let rendered = templates.render("template.html", &context)?;
         info!(
             elapsed_ms = render_started.elapsed().as_millis(),
             "agent-browser template rendered"
@@ -112,21 +116,48 @@ fn command_path(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn split_info(code: &str, label: &LabelInfo) -> TemplateData {
-    let infos = code.split('|').collect::<Vec<&str>>();
-    TemplateData {
-        material_no: infos[0].to_string(),
-        lot_no: infos[1].to_string(),
-        order_no: infos[2].to_string(),
-        count: infos[3].to_string(),
-        vender_code: infos[4].to_string(),
-        date: infos[5].to_string(),
-        box_no: infos[6].to_string(),
-        part_no: label.part_no.clone(),
-        material_name: label.material_name.clone(),
-        customer_name: label.customer_name.clone(),
-        qr_code: None,
+/// 由请求 JSON 构建模板上下文：qr_string 按 | 分段 + 请求顶层字段（值转字符串）。
+/// 字段名对应模板里的 {{ }} 占位符；新增字段只需请求方带上同名 key，无需改代码
+fn build_template_context(
+    qr_string: &str,
+    label: &serde_json::Value,
+) -> Result<Context, CustomError> {
+    let parts: Vec<&str> = qr_string.split('|').collect();
+    if parts.len() < 7 {
+        return Err(CustomError::OtherLibraryError(format!(
+            "qr_string 分段不足（需要 7 段）: {qr_string}"
+        )));
     }
+    let mut map = serde_json::Map::new();
+    if let Some(obj) = label.as_object() {
+        for (key, value) in obj {
+            let text = match value {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Number(n) => Some(n.to_string()),
+                serde_json::Value::Bool(b) => Some(b.to_string()),
+                _ => None,
+            };
+            if let Some(text) = text {
+                map.insert(key.clone(), serde_json::Value::String(text));
+            }
+        }
+    }
+    // qr_string 分段是这些字段的权威来源
+    for (key, value) in [
+        ("material_no", parts[0]),
+        ("lot_no", parts[1]),
+        ("order_no", parts[2]),
+        ("count", parts[3]),
+        ("vender_code", parts[4]),
+        ("date", parts[5]),
+        ("box_no", parts[6]),
+    ] {
+        map.insert(
+            key.to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    Ok(Context::from_serialize(&serde_json::Value::Object(map))?)
 }
 
 fn qr_code_data_uri(content: &str) -> Result<String, CustomError> {
@@ -180,40 +211,28 @@ impl Drop for TempScreenshot {
     }
 }
 
-#[derive(Serialize)]
-struct TemplateData {
-    material_no: String,
-    lot_no: String,
-    order_no: String,
-    count: String,
-    vender_code: String,
-    date: String,
-    box_no: String,
-    part_no: String,
-    material_name: String,
-    customer_name: String,
-    qr_code: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn sample_label() -> LabelInfo {
-        LabelInfo {
-            kind: 0,
-            customer_name: "测试客户".to_string(),
-            part_no: "P-001".to_string(),
-            material_name: "测试物料".to_string(),
-            qr_string: "M001|L001|O001|10|V001|2026-08-07|B001".to_string(),
-            is_return: false,
-        }
+    const SAMPLE_QR: &str = "M001|L001|O001|10|V001|2026-08-07|B001";
+
+    fn sample_label() -> serde_json::Value {
+        serde_json::json!({
+            "kind": 0,
+            "customer_name": "测试客户",
+            "part_no": "P-001",
+            "material_name": "测试物料",
+            "qr_string": SAMPLE_QR,
+            "is_return": false
+        })
     }
 
     #[test]
     fn renders_template_with_agent_browser_template_data() {
-        let template_data = split_info("M001|L001|O001|10|V001|2026-08-07|B001", &sample_label());
-        let context = Context::from_serialize(&template_data).expect("serialize template data");
+        let mut context =
+            build_template_context(SAMPLE_QR, &sample_label()).expect("build context");
+        context.insert("qr_code", &"data:image/png;base64,test");
 
         let rendered = load_templates()
             .expect("load templates")
@@ -228,6 +247,27 @@ mod tests {
         assert!(rendered.contains("L001"));
         assert!(rendered.contains("O001"));
         assert!(rendered.contains("B001"));
+    }
+
+    #[test]
+    fn renders_custom_fields_from_request() {
+        let mut label = sample_label();
+        label["custom_field"] = serde_json::json!("自定义值");
+        let context =
+            build_template_context(SAMPLE_QR, &label).expect("build context with custom field");
+        let mut tera = Tera::default();
+        tera.add_raw_template("t", "{{ custom_field }}|{{ count }}|{{ part_no }}")
+            .expect("add raw template");
+
+        assert_eq!(
+            tera.render("t", &context).expect("render custom field"),
+            "自定义值|10|P-001"
+        );
+    }
+
+    #[test]
+    fn rejects_qr_string_with_too_few_segments() {
+        assert!(build_template_context("too-short", &sample_label()).is_err());
     }
 
     #[test]
@@ -259,16 +299,13 @@ mod tests {
 
     #[test]
     fn renders_template_without_relative_qr_file() {
-        let mut template_data =
-            split_info("M001|L001|O001|10|V001|2026-08-07|B001", &sample_label());
         let qr_code = qr_code_data_uri("M001").expect("encode QR code");
-        template_data.qr_code = Some(qr_code.clone());
+        let mut context =
+            build_template_context(SAMPLE_QR, &sample_label()).expect("build context");
+        context.insert("qr_code", &qr_code);
         let rendered = load_templates()
             .expect("load templates")
-            .render(
-                "template.html",
-                &Context::from_serialize(&template_data).expect("serialize template data"),
-            )
+            .render("template.html", &context)
             .expect("agent-browser template should render");
 
         // 共用模板中 QR 图片必须渲染为传入的 data URI（相对路径形式只存在于 HTML 注释里）

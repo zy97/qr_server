@@ -62,8 +62,9 @@
   </div>
 </div>
 <script>
-// 与后端 TemplateData / main.typ 对齐的字段清单
-const FIELDS = [
+// 内置字段清单（新模板的默认值）。每个模板的字段列表存于模板 JSON 的 fields 键，
+// 支持在设计器里增删改——请求数据不同的模板可以自己控制字段
+const DEFAULT_FIELDS = [
   { name: 'part_no',       title: '零件号' },
   { name: 'material_no',   title: '物料编码' },
   { name: 'material_name', title: '物料名称' },
@@ -75,15 +76,22 @@ const FIELDS = [
   { name: 'customer_name', title: '客户名称' },
 ];
 
-function labelProvider() {}
-labelProvider.prototype.addElementTypes = function (context) {
-  const fieldEls = FIELDS.map(f => ({
+// 当前模板的字段列表（加载时从模板 JSON 读取，未保存过则为内置默认）
+let templateFields = DEFAULT_FIELDS.map(f => ({ ...f }));
+
+function fieldTypeConfig(f) {
+  return {
     tid: 'labelModule.' + f.name,
     title: f.title,
     field: f.name,
     type: 'text',
     options: { width: 120, height: 24, fontSize: 10.5, fontWeight: '700', textAlign: 'center', hideTitle: true, testData: '{{ ' + f.name + ' }}' }
-  }));
+  };
+}
+
+function labelProvider() {}
+labelProvider.prototype.addElementTypes = function (context) {
+  const fieldEls = templateFields.map(fieldTypeConfig);
   context.addPrintElementTypes('labelModule', [
     new hiprint.PrintElementTypeGroup('标签字段', fieldEls),
     new hiprint.PrintElementTypeGroup('基础元素', [
@@ -103,9 +111,65 @@ function setStatus(msg, isError) {
   $('#status').text(msg).css('color', isError ? '#ff9d9d' : '#9de69d');
 }
 
+function fieldPaletteItem(f) {
+  const $item = $('<div class="ep-draggable-item"></div>').attr('tid', 'labelModule.' + f.name)
+    .append($('<span class="field-label"></span>').text(f.title + '（' + f.name + '）'));
+  const $actions = $('<span style="float:right"></span>');
+  // 注意用 mousedown 拦截：hidraggable 会在拖拽开始时吞掉 click/dblclick
+  const mkBtn = (text, title, color) => $('<span style="cursor:pointer;padding:0 3px"></span>')
+    .text(text).css('color', color).attr('title', title);
+  mkBtn('✎', '改显示名', '#4a90d9').on('mousedown', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const title = prompt('字段显示名：', f.title);
+    if (title && title.trim()) {
+      f.title = title.trim();
+      $item.find('.field-label').text(f.title + '（' + f.name + '）');
+    }
+  }).appendTo($actions);
+  mkBtn('×', '删除', '#c00').on('mousedown', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (confirm('从字段列表移除「' + f.title + '」？（画布上已有元素不受影响）')) {
+      templateFields = templateFields.filter(x => x.name !== f.name);
+      $item.remove();
+    }
+  }).appendTo($actions);
+  $item.append($actions);
+  return $item;
+}
+
+function addField() {
+  const name = $('#new-field-name').val().trim();
+  const title = $('#new-field-title').val().trim() || name;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    setStatus('字段名只能包含字母、数字、下划线', true);
+    return;
+  }
+  if (templateFields.some(f => f.name === name)) {
+    setStatus('字段名已存在: ' + name, true);
+    return;
+  }
+  const f = { name, title };
+  templateFields.push(f);
+  // 动态注册元素类型（追加一个单字段 provider 再 init 一次）并加入拖拽面板
+  const provider = function () {};
+  provider.prototype.addElementTypes = function (context) {
+    context.addPrintElementTypes('labelModule', [
+      new hiprint.PrintElementTypeGroup('标签字段', [fieldTypeConfig(f)])
+    ]);
+  };
+  hiprint.init({ providers: [new provider()] });
+  const $item = fieldPaletteItem(f);
+  $('#field-items').append($item);
+  hiprint.PrintElementTypeManager.buildByHtml($item);
+  $('#new-field-name, #new-field-title').val('');
+  setStatus('已添加字段 ' + name + '（保存模板后生效）');
+}
+
 function buildPalette() {
   const groups = [
-    { title: '标签字段', items: FIELDS.map(f => ({ tid: 'labelModule.' + f.name, title: f.title })) },
+    { title: '标签字段', items: null },
     { title: '基础元素', items: [
       { tid: 'labelModule.qrCode', title: '二维码' },
       { tid: 'labelModule.text', title: '固定文本' },
@@ -118,6 +182,19 @@ function buildPalette() {
   const $palette = $('#palette').empty();
   groups.forEach(g => {
     $palette.append($('<div class="group-title"></div>').text(g.title));
+    if (g.title === '标签字段') {
+      $palette.append($('<div id="field-items"></div>'));
+      templateFields.forEach(f => $('#field-items').append(fieldPaletteItem(f)));
+      $palette.append($(
+        '<div style="margin-top:6px;border-top:1px dashed #ccc;padding-top:6px">' +
+        '<input id="new-field-name" placeholder="字段名 如 batch" style="width:100%;box-sizing:border-box;margin-bottom:4px;font-size:12px">' +
+        '<input id="new-field-title" placeholder="显示名（可空）" style="width:100%;box-sizing:border-box;margin-bottom:4px;font-size:12px">' +
+        '<button id="btn-add-field" style="width:100%;font-size:12px;cursor:pointer">添加字段</button>' +
+        '</div>'
+      ));
+      $('#btn-add-field').on('click', addField);
+      return;
+    }
     g.items.forEach(item => {
       $palette.append($('<div class="ep-draggable-item"></div>').attr('tid', item.tid).text(item.title));
     });
@@ -178,14 +255,13 @@ function initDesigner(templateJson) {
   customizeOptionPanels();
 }
 
+// 占位符数据以画布上元素实际使用的字段为准（与字段面板的增删无关）：
+// 普通字段生成 {{ field }}；字段名直接写占位符表达式（如 {{ count }}个）的原样输出，由 Tera 替换
 function placeholderData(templateJson) {
-  const data = {};
-  FIELDS.forEach(f => { data[f.name] = '{{ ' + f.name + ' }}'; });
-  data.qr_code = '{{ qr_code }}';
-  // 字段名直接写占位符表达式（如 {{ count }}个）：原样输出，由 Tera 渲染时替换
+  const data = { qr_code: '{{ qr_code }}' };
   ((templateJson && templateJson.panels) || []).forEach(p => (p.printElements || []).forEach(el => {
     const f = el.options && el.options.field;
-    if (f && f.includes('{{')) data[f] = f;
+    if (f) data[f] = f.includes('{{') ? f : '{{ ' + f + ' }}';
   }));
   return data;
 }
@@ -267,6 +343,7 @@ function collectHiprintCss() {
 function buildTemplateHtml() {
   let json = hiprintTemplate.getJson();
   if (typeof json === 'string') json = JSON.parse(json);
+  json.fields = templateFields;
   const $html = hiprintTemplate.getHtml(placeholderData(json));
   const $wrap = $('<div>').append($html);
   // 纯展示模板：去掉可聚焦属性（点击会出现焦点高亮框）和浏览器打印用的 @page 块
@@ -337,6 +414,9 @@ $(async () => {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const record = await resp.json();
     $('#tpl-name').text('— ' + record.name + (record.is_default ? '（默认）' : ''));
+    if (Array.isArray(record.design_json.fields) && record.design_json.fields.length) {
+      templateFields = record.design_json.fields;
+    }
     initDesigner(applyFieldPlaceholders(record.design_json));
     setStatus('已加载模板');
   } catch (e) {
