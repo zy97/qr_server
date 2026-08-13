@@ -112,20 +112,19 @@ function setStatus(msg, isError) {
 }
 
 function fieldPaletteItem(f) {
-  const $item = $('<div class="ep-draggable-item"></div>').attr('tid', 'labelModule.' + f.name)
-    .append($('<span class="field-label"></span>').text(f.title + '（' + f.name + '）'));
-  const $actions = $('<span style="float:right"></span>');
+  // flex 布局：文本超长省略号，按钮固定右侧不换行
+  const $item = $('<div class="ep-draggable-item" style="display:flex;align-items:center;gap:2px"></div>')
+    .attr('tid', 'labelModule.' + f.name)
+    .append($('<span class="field-label" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>')
+      .text(f.title + '（' + f.name + '）'));
+  const $actions = $('<span style="white-space:nowrap"></span>');
   // 注意用 mousedown 拦截：hidraggable 会在拖拽开始时吞掉 click/dblclick
   const mkBtn = (text, title, color) => $('<span style="cursor:pointer;padding:0 3px"></span>')
     .text(text).css('color', color).attr('title', title);
-  mkBtn('✎', '改显示名', '#4a90d9').on('mousedown', (e) => {
+  mkBtn('✎', '编辑字段', '#4a90d9').on('mousedown', (e) => {
     e.stopPropagation();
     e.preventDefault();
-    const title = prompt('字段显示名：', f.title);
-    if (title && title.trim()) {
-      f.title = title.trim();
-      $item.find('.field-label').text(f.title + '（' + f.name + '）');
-    }
+    editField(f, $item);
   }).appendTo($actions);
   mkBtn('×', '删除', '#c00').on('mousedown', (e) => {
     e.stopPropagation();
@@ -137,6 +136,43 @@ function fieldPaletteItem(f) {
   }).appendTo($actions);
   $item.append($actions);
   return $item;
+}
+
+// 追加一个单字段 provider 再 init 一次，完成元素类型注册
+function registerFieldType(f) {
+  const provider = function () {};
+  provider.prototype.addElementTypes = function (context) {
+    context.addPrintElementTypes('labelModule', [
+      new hiprint.PrintElementTypeGroup('标签字段', [fieldTypeConfig(f)])
+    ]);
+  };
+  hiprint.init({ providers: [new provider()] });
+}
+
+// 编辑字段名与显示名；字段名变化时更新 tid 并注册新类型（画布上已有元素保持原绑定）
+function editField(f, $item) {
+  const nameInput = prompt('字段名（字母/数字/下划线）：', f.name);
+  if (nameInput === null) return;
+  const newName = nameInput.trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(newName)) {
+    setStatus('字段名只能包含字母、数字、下划线', true);
+    return;
+  }
+  if (newName !== f.name && templateFields.some(x => x.name === newName)) {
+    setStatus('字段名已存在: ' + newName, true);
+    return;
+  }
+  const titleInput = prompt('字段显示名：', f.title);
+  if (titleInput === null) return;
+  const nameChanged = newName !== f.name;
+  f.name = newName;
+  f.title = titleInput.trim() || newName;
+  $item.attr('tid', 'labelModule.' + newName);
+  $item.find('.field-label').text(f.title + '（' + f.name + '）');
+  if (nameChanged) {
+    registerFieldType(f);
+    hiprint.PrintElementTypeManager.buildByHtml($item);
+  }
 }
 
 function addField() {
@@ -152,14 +188,7 @@ function addField() {
   }
   const f = { name, title };
   templateFields.push(f);
-  // 动态注册元素类型（追加一个单字段 provider 再 init 一次）并加入拖拽面板
-  const provider = function () {};
-  provider.prototype.addElementTypes = function (context) {
-    context.addPrintElementTypes('labelModule', [
-      new hiprint.PrintElementTypeGroup('标签字段', [fieldTypeConfig(f)])
-    ]);
-  };
-  hiprint.init({ providers: [new provider()] });
+  registerFieldType(f);
   const $item = fieldPaletteItem(f);
   $('#field-items').append($item);
   hiprint.PrintElementTypeManager.buildByHtml($item);
