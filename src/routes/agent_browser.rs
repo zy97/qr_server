@@ -131,14 +131,9 @@ fn build_template_context(
     let mut map = serde_json::Map::new();
     if let Some(obj) = label.as_object() {
         for (key, value) in obj {
-            let text = match value {
-                serde_json::Value::String(s) => Some(s.clone()),
-                serde_json::Value::Number(n) => Some(n.to_string()),
-                serde_json::Value::Bool(b) => Some(b.to_string()),
-                _ => None,
-            };
-            if let Some(text) = text {
-                map.insert(key.clone(), serde_json::Value::String(text));
+            // 字符串/数字/布尔保持原生类型进入上下文（模板里可做 == true、if is_return 等判断）
+            if value.is_string() || value.is_number() || value.is_boolean() {
+                map.insert(key.clone(), value.clone());
             }
         }
     }
@@ -314,6 +309,23 @@ mod tests {
             tera.render("t", &context).expect("render custom field"),
             "自定义值|10|P-001"
         );
+    }
+
+    #[test]
+    fn renders_ternary_expression_with_bool_field() {
+        // Tera 三元语法为 Python 风格："值1" if 条件 else "值2"
+        let mut label = sample_label();
+        label["is_return"] = serde_json::json!(true);
+        let context = build_template_context(&label, "").expect("build context");
+        let mut tera = Tera::default();
+        tera.add_raw_template("t", r#"{{ "回" if is_return else "" }}"#)
+            .expect("add raw template");
+
+        assert_eq!(tera.render("t", &context).expect("render"), "回");
+
+        label["is_return"] = serde_json::json!(false);
+        let context = build_template_context(&label, "").expect("build context");
+        assert_eq!(tera.render("t", &context).expect("render"), "");
     }
 
     #[test]

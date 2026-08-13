@@ -230,7 +230,7 @@ function buildPalette() {
     });
   });
   $palette.append($('<div style="padding:8px 4px;font-size:12px;color:#888;line-height:1.6"></div>')
-    .text('提示：文本内容或字段名里可直接写占位符表达式，如 {{ count }}个 渲染为 100个；支持拆分访问：{{ qr_string | [6] }} 表示 qr_string 按 | 切分取第 6 段（分隔符可自定义）。'));
+    .text('提示：文本内容或字段名里可直接写表达式，如 {{ count }}个、{{ "回" if is_return else "" }}（条件判断）、{{ qr_string | [6] }}（按 | 切分取第 6 段，分隔符可自定义）。'));
 }
 
 // 画布上字段元素显示 {{ 字段名 }} 占位符，直观看清绑定关系；
