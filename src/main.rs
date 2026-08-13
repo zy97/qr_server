@@ -1,9 +1,9 @@
 mod child_cleanup;
-#[cfg(any(feature = "master", feature = "typst", feature = "chrome"))]
+#[cfg(any(feature = "typst", feature = "chrome"))]
 mod config;
 mod designer;
 pub mod err;
-#[cfg(any(feature = "master", feature = "typst", feature = "chrome"))]
+#[cfg(any(feature = "typst", feature = "chrome"))]
 mod print;
 mod requests;
 mod routes;

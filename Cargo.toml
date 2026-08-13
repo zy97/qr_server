@@ -5,13 +5,7 @@ version = "0.1.0"
 
 [features]
 default = ["chrome"]
-master = [
-    "dep:anyhow",
-    "dep:headless_chrome",
-    "dep:image",
-    "dep:qrcode",
-    "dep:tera",
-]
+
 typst = [
     "dep:tokio",
 ]
@@ -36,9 +30,7 @@ actix-web = "4"
 anyhow = { version = "1", optional = true }
 chromiumoxide = { version = "=0.9.1", optional = true }
 futures = { version = "0.3", optional = true }
-headless_chrome = { version = "1.0.22", features = [
-    "fetch",
-], optional = true }
+
 image = { version = "0.25", optional = true }
 qrcode = { version = "0.14.1", optional = true }
 serde = { version = "1", features = ["derive"] }

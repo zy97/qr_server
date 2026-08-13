@@ -8,7 +8,7 @@ use tracing::{error, info};
 use crate::config::CONFIG;
 use crate::err::CustomError;
 
-/// 通过 PowerShell System.Drawing 把标签 PNG 发送到打印机（master/typst/chrome 共用）。
+/// 通过 PowerShell System.Drawing 把标签 PNG 发送到打印机（typst/chrome 共用）。
 /// 打印逻辑一比一移植自原 C# 打印服务的 Print(byte[] images)：
 /// 自定义纸张 + StandardPrintController（跳过打印对话框），按可用宽度缩放、垂直偏移居中。
 /// 图片数据以 Base64 经标准输入传给 PowerShell 进程，全程在内存中传递，不落盘。

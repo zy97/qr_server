@@ -237,7 +237,7 @@ mod tests {
         let rendered = load_templates()
             .expect("load templates")
             .render("template.html", &context)
-            .expect("agent-browser template should render with master template data");
+            .expect("agent-browser template should render with template data");
 
         // 与 main.typ 一致的动态字段都应渲染出来
         assert!(rendered.contains("P-001"));
