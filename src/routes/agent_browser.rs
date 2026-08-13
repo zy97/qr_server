@@ -45,13 +45,8 @@ async fn create_label(
     let templates = load_templates()?;
     for label in labels {
         let render_started = Instant::now();
-        let qr_string = label
-            .get("qr_string")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| CustomError::OtherLibraryError("missing qr_string".to_string()))?;
         let template_html = std::fs::read_to_string("templates/template.html")?;
-        let mut context = build_template_context(qr_string, &label, &template_html)?;
-        context.insert("qr_code", &qr_code_data_uri(qr_string)?);
+        let context = build_template_context(&label, &template_html)?;
 
         let rendered = templates.render("template.html", &context)?;
         info!(
@@ -120,10 +115,13 @@ fn command_path(path: &std::path::Path) -> String {
 /// 由请求 JSON 构建模板上下文：qr_string 按 | 分段 + 请求顶层字段（值转字符串）。
 /// 字段名对应模板里的 {{ }} 占位符；新增字段只需请求方带上同名 key，无需改代码
 fn build_template_context(
-    qr_string: &str,
     label: &serde_json::Value,
     template_html: &str,
 ) -> Result<Context, CustomError> {
+    let qr_string = label
+        .get("qr_string")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| CustomError::OtherLibraryError("missing qr_string".to_string()))?;
     let parts: Vec<&str> = qr_string.split('|').collect();
     if parts.len() < 7 {
         return Err(CustomError::OtherLibraryError(format!(
@@ -161,7 +159,9 @@ fn build_template_context(
     }
     apply_split_variables(&mut map, template_html);
 
-    Ok(Context::from_serialize(&serde_json::Value::Object(map))?)
+    let mut context = Context::from_serialize(&serde_json::Value::Object(map))?;
+    context.insert("qr_code", &qr_code_data_uri(qr_string)?);
+    Ok(context)
 }
 
 /// 模板里形如 {{ _x_<字段>_<分隔符hex>_<下标> }} 的拆分变量：
@@ -280,13 +280,11 @@ mod tests {
 
     #[test]
     fn renders_template_with_agent_browser_template_data() {
-        let mut context = build_template_context(
-            SAMPLE_QR,
+        let context = build_template_context(
             &sample_label(),
             &std::fs::read_to_string("templates/template.html").expect("read template"),
         )
         .expect("build context");
-        context.insert("qr_code", &"data:image/png;base64,test");
 
         let rendered = load_templates()
             .expect("load templates")
@@ -307,8 +305,7 @@ mod tests {
     fn renders_custom_fields_from_request() {
         let mut label = sample_label();
         label["custom_field"] = serde_json::json!("自定义值");
-        let context =
-            build_template_context(SAMPLE_QR, &label, "").expect("build context with custom field");
+        let context = build_template_context(&label, "").expect("build context with custom field");
         let mut tera = Tera::default();
         tera.add_raw_template("t", "{{ custom_field }}|{{ count }}|{{ part_no }}")
             .expect("add raw template");
@@ -321,14 +318,15 @@ mod tests {
 
     #[test]
     fn rejects_qr_string_with_too_few_segments() {
-        assert!(build_template_context("too-short", &sample_label(), "").is_err());
+        let mut label = sample_label();
+        label["qr_string"] = serde_json::json!("too-short");
+        assert!(build_template_context(&label, "").is_err());
     }
 
     #[test]
     fn renders_split_variable_with_custom_separator() {
         // {{ _x_qr_string_7c_6 }}：qr_string 按 | 切分取第 6 段；{{ _x_date_2d_1 }}：date 按 - 切分取第 1 段
         let context = build_template_context(
-            SAMPLE_QR,
             &sample_label(),
             "{{ _x_qr_string_7c_6 }}|{{ _x_date_2d_1 }}",
         )
@@ -369,21 +367,18 @@ mod tests {
 
     #[test]
     fn renders_template_without_relative_qr_file() {
-        let qr_code = qr_code_data_uri("M001").expect("encode QR code");
-        let mut context = build_template_context(
-            SAMPLE_QR,
+        let context = build_template_context(
             &sample_label(),
             &std::fs::read_to_string("templates/template.html").expect("read template"),
         )
         .expect("build context");
-        context.insert("qr_code", &qr_code);
         let rendered = load_templates()
             .expect("load templates")
             .render("template.html", &context)
             .expect("agent-browser template should render");
 
-        // 共用模板中 QR 图片必须渲染为传入的 data URI（相对路径形式只存在于 HTML 注释里）
-        assert!(rendered.contains(&format!("src=\"{qr_code}\"")));
+        // 模板中 QR 图片必须渲染为 qr_code data URI
+        assert!(rendered.contains("src=\"data:image/png;base64,"));
     }
 
     #[test]
