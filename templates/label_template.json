@@ -18,7 +18,8 @@
             "height": 28,
             "title": "表头框",
             "coordinateSync": true,
-            "widthHeightSync": true
+            "widthHeightSync": true,
+            "zIndex": -1
           },
           "printElementType": {
             "title": "矩形",
@@ -191,7 +192,8 @@
             "title": "二维码框",
             "top": 66,
             "width": 100,
-            "widthHeightSync": true
+            "widthHeightSync": true,
+            "zIndex": -1
           },
           "printElementType": {
             "title": "矩形",

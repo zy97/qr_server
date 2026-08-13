@@ -5,6 +5,7 @@ mod designer;
 pub mod err;
 #[cfg(any(feature = "typst", feature = "chrome"))]
 mod print;
+#[cfg(feature = "typst")]
 mod requests;
 mod routes;
 mod template_store;
@@ -34,6 +35,8 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .wrap(middleware::Logger::default())
+            // 页面/接口内容实时来自磁盘与数据库，禁止浏览器启发式缓存
+            .wrap(middleware::DefaultHeaders::new().add(("Cache-Control", "no-cache")))
             .configure(routes::configure)
             .configure(designer::configure)
     })

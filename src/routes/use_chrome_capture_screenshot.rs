@@ -443,8 +443,12 @@ mod tests {
 
     #[test]
     fn renders_template_with_chrome_template_data() {
-        let mut context =
-            build_template_context(SAMPLE_QR, &sample_label(), "").expect("build context");
+        let mut context = build_template_context(
+            SAMPLE_QR,
+            &sample_label(),
+            &std::fs::read_to_string("templates/template.html").expect("read template"),
+        )
+        .expect("build context");
         context.insert("qr_code", &"data:image/png;base64,test");
 
         let rendered = load_templates()
@@ -464,8 +468,12 @@ mod tests {
 
     #[test]
     fn renders_template_without_relative_image_files() {
-        let mut context =
-            build_template_context(SAMPLE_QR, &sample_label(), "").expect("build context");
+        let mut context = build_template_context(
+            SAMPLE_QR,
+            &sample_label(),
+            &std::fs::read_to_string("templates/template.html").expect("read template"),
+        )
+        .expect("build context");
         context.insert(
             "qr_code",
             &qr_code_data_uri(SAMPLE_QR).expect("encode QR code"),
