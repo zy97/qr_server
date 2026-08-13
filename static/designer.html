@@ -230,7 +230,7 @@ function buildPalette() {
     });
   });
   $palette.append($('<div style="padding:8px 4px;font-size:12px;color:#888;line-height:1.6"></div>')
-    .text('提示：固定文本内容或字段名里都可直接写占位符表达式，如 {{ count }}个，渲染时会替换成 100个。'));
+    .text('提示：文本内容或字段名里可直接写占位符表达式，如 {{ count }}个 渲染为 100个；支持拆分访问：{{ qr_string | [6] }} 表示 qr_string 按 | 切分取第 6 段（分隔符可自定义）。'));
 }
 
 // 画布上字段元素显示 {{ 字段名 }} 占位符，直观看清绑定关系；
@@ -362,6 +362,17 @@ function initDesigner(templateJson) {
   }
 }
 
+// 拆分访问表达式：{{ 字段 分隔符 [下标] }}（如 {{ qr_string | [6] }}）
+// 保存时编译为 Tera 合法变量 {{ _x_qr_string_7c_6 }}，分隔符 UTF-8 字节 hex 编码进变量名，
+// 后端渲染时按编码切分请求字段值并取下标
+const SPLIT_EXPR_RE = /\{\{\s*([A-Za-z_]\w*)\s+(\S+)\s*\[(\d+)\]\s*\}\}/g;
+function encodeSplitExpressions(html) {
+  return html.replace(SPLIT_EXPR_RE, (m, field, sep, idx) => {
+    const hex = Array.from(new TextEncoder().encode(sep))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    return '{{ _x_' + field + '_' + hex + '_' + idx + ' }}';
+  });
+}
 // 占位符数据以画布上元素实际使用的字段为准（与字段面板的增删无关）：
 // 普通字段生成 {{ field }}；字段名直接写占位符表达式（如 {{ count }}个）的原样输出，由 Tera 替换
 function placeholderData(templateJson) {
@@ -468,7 +479,7 @@ function buildTemplateHtml() {
     + '#app { position: relative; width: ' + width + 'mm; height: ' + height + 'mm; overflow: hidden; }\n'
     + '</style>\n<style>\n' + collectHiprintCss() + '\n</style>\n</head>\n<body>\n'
     + '<div id="app">' + panelHtml + '</div>\n</body>\n</html>';
-  return { json, html: doc };
+  return { json, html: encodeSplitExpressions(doc) };
 }
 
 $('#btn-save').on('click', async () => {

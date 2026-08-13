@@ -108,7 +108,8 @@ async fn create_label(
             .get("qr_string")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| CustomError::OtherLibraryError("missing qr_string".to_string()))?;
-        let mut context = build_template_context(qr_string, &label)?;
+        let template_html = std::fs::read_to_string("templates/template.html")?;
+        let mut context = build_template_context(qr_string, &label, &template_html)?;
         context.insert("qr_code", &qr_code_data_uri(qr_string)?);
 
         let rendered = templates.render("template.html", &context)?;
@@ -306,6 +307,7 @@ fn parse_label_viewport(value: &str) -> Result<Viewport, anyhow::Error> {
 fn build_template_context(
     qr_string: &str,
     label: &serde_json::Value,
+    template_html: &str,
 ) -> Result<Context, CustomError> {
     let parts: Vec<&str> = qr_string.split('|').collect();
     if parts.len() < 7 {
@@ -342,6 +344,8 @@ fn build_template_context(
             serde_json::Value::String(value.to_string()),
         );
     }
+    apply_split_variables(&mut map, template_html);
+
     Ok(Context::from_serialize(&serde_json::Value::Object(map))?)
 }
 
@@ -354,6 +358,52 @@ fn qr_code_data_uri(content: &str) -> Result<String, CustomError> {
         "data:image/png;base64,{}",
         general_purpose::STANDARD.encode(png_bytes)
     ))
+}
+
+/// 模板里形如 {{ _x_<字段>_<分隔符hex>_<下标> }} 的拆分变量：
+/// 取上下文中对应字段的值，按分隔符切分后取下标（字段缺失或越界给空串）
+fn apply_split_variables(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    template_html: &str,
+) {
+    let mut rest = template_html;
+    while let Some(start) = rest.find("{{ _x_") {
+        let after = &rest[start + 6..];
+        let Some(end) = after.find("}}") else { break };
+        let key = after[..end].trim();
+        rest = &after[end + 2..];
+        // 从尾部解析：<字段>_<分隔符hex>_<下标>（字段名本身可能含下划线）
+        let body = key; // find 的 "{{ _x_" 已含 _x_ 前缀，此处 key 即字段起始
+        let Some(i1) = body.rfind('_') else { continue };
+        let (head, index_str) = (&body[..i1], &body[i1 + 1..]);
+        let Some(i2) = head.rfind('_') else { continue };
+        let (field, sep_hex) = (&head[..i2], &head[i2 + 1..]);
+        let Ok(index) = index_str.parse::<usize>() else {
+            continue;
+        };
+        let Some(sep) = decode_hex(sep_hex).and_then(|b| String::from_utf8(b).ok()) else {
+            continue;
+        };
+        if sep.is_empty() {
+            continue;
+        }
+        let value = map.get(field).and_then(|v| v.as_str()).unwrap_or_default();
+        let part = value.split(&sep).nth(index).unwrap_or_default().to_string();
+        if part.is_empty() && !value.is_empty() {
+            tracing::warn!(field, index, "split variable out of range");
+        }
+        map.insert(format!("_x_{body}"), serde_json::Value::String(part));
+    }
+}
+
+fn decode_hex(hex: &str) -> Option<Vec<u8>> {
+    if hex.is_empty() || hex.len() % 2 != 0 {
+        return None;
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+        .collect()
 }
 
 fn html_data_url(html: &str) -> String {
@@ -394,7 +444,7 @@ mod tests {
     #[test]
     fn renders_template_with_chrome_template_data() {
         let mut context =
-            build_template_context(SAMPLE_QR, &sample_label()).expect("build context");
+            build_template_context(SAMPLE_QR, &sample_label(), "").expect("build context");
         context.insert("qr_code", &"data:image/png;base64,test");
 
         let rendered = load_templates()
@@ -415,7 +465,7 @@ mod tests {
     #[test]
     fn renders_template_without_relative_image_files() {
         let mut context =
-            build_template_context(SAMPLE_QR, &sample_label()).expect("build context");
+            build_template_context(SAMPLE_QR, &sample_label(), "").expect("build context");
         context.insert(
             "qr_code",
             &qr_code_data_uri(SAMPLE_QR).expect("encode QR code"),
@@ -435,7 +485,7 @@ mod tests {
         let mut label = sample_label();
         label["custom_field"] = serde_json::json!("自定义值");
         let context =
-            build_template_context(SAMPLE_QR, &label).expect("build context with custom field");
+            build_template_context(SAMPLE_QR, &label, "").expect("build context with custom field");
         let mut tera = Tera::default();
         tera.add_raw_template("t", "{{ custom_field }}|{{ count }}|{{ part_no }}")
             .expect("add raw template");
@@ -448,7 +498,23 @@ mod tests {
 
     #[test]
     fn rejects_qr_string_with_too_few_segments() {
-        assert!(build_template_context("too-short", &sample_label()).is_err());
+        assert!(build_template_context("too-short", &sample_label(), "").is_err());
+    }
+
+    #[test]
+    fn renders_split_variable_with_custom_separator() {
+        // {{ _x_qr_string_7c_6 }}：qr_string 按 | 切分取第 6 段；{{ _x_date_2d_1 }}：date 按 - 切分取第 1 段
+        let context = build_template_context(
+            SAMPLE_QR,
+            &sample_label(),
+            "{{ _x_qr_string_7c_6 }}|{{ _x_date_2d_1 }}",
+        )
+        .expect("build context");
+        let mut tera = Tera::default();
+        tera.add_raw_template("t", "{{ _x_qr_string_7c_6 }}|{{ _x_date_2d_1 }}")
+            .expect("add raw template");
+
+        assert_eq!(tera.render("t", &context).expect("render"), "B001|08");
     }
 
     #[test]
