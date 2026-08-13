@@ -338,6 +338,7 @@ fn build_template_context(
         );
     }
     apply_split_variables(&mut map, template_html);
+    fill_missing_variables(&mut map, template_html);
 
     let mut context = Context::from_serialize(&serde_json::Value::Object(map))?;
     context.insert("qr_code", &qr_code_data_uri(qr_string)?);
@@ -399,6 +400,31 @@ fn decode_hex(hex: &str) -> Option<Vec<u8>> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
         .collect()
+}
+
+/// 模板里 {{ 标识符 }} 形式的变量在上下文中缺失时补空串，
+/// 避免单个字段缺失导致整单渲染失败（拆分变量由 apply_split_variables 处理，此处跳过）
+fn fill_missing_variables(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    template_html: &str,
+) {
+    let mut rest = template_html;
+    while let Some(start) = rest.find("{{") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("}}") else { break };
+        let key = after[..end].trim();
+        rest = &after[end + 2..];
+        let is_ident = key
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_alphabetic() || c == '_')
+            .unwrap_or(false)
+            && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if is_ident && !key.starts_with("_x_") {
+            map.entry(key.to_string())
+                .or_insert_with(|| serde_json::Value::String(String::new()));
+        }
+    }
 }
 
 fn html_data_url(html: &str) -> String {
@@ -506,6 +532,18 @@ mod tests {
         label["is_return"] = serde_json::json!(false);
         let context = build_template_context(&label, "").expect("build context");
         assert_eq!(tera.render("t", &context).expect("render"), "");
+    }
+
+    #[test]
+    fn missing_template_variable_renders_as_empty() {
+        // 请求数据里没有的字段渲染为空串，而不是整单报错
+        let context = build_template_context(&sample_label(), "{{ part_no }}|{{ not_in_request }}")
+            .expect("build context");
+        let mut tera = Tera::default();
+        tera.add_raw_template("t", "{{ part_no }}|{{ not_in_request }}")
+            .expect("add raw template");
+
+        assert_eq!(tera.render("t", &context).expect("render"), "P-001|");
     }
 
     #[test]

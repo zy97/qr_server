@@ -30,7 +30,8 @@
   #canvas-wrap { flex: 1; overflow: auto; padding: 20px; background: #e8e8e8; }
   #settings { width: 260px; border-left: 1px solid #ccc; overflow-y: auto; background: #fafafa; }
   #preview-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 99; }
-  #preview-box { display: flex; gap: 16px; position: absolute; top: 5%; left: 50%; transform: translateX(-50%); background: #fff; padding: 20px; border-radius: 6px; }
+  #preview-box { display: flex; gap: 16px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 6px; width: 1380px; height: 760px; box-sizing: border-box; overflow: hidden; }
+  #preview-box .preview-result { flex: 1; min-width: 0; overflow: auto; }
   #preview-close { margin-top: 12px; }
 </style>
 </head>
@@ -71,7 +72,7 @@
         <span id="preview-status" style="font-size:12px;color:#c00;margin-left:8px"></span>
       </div>
     </div>
-    <div style="max-width:55vw;overflow:auto"><img id="preview-img" style="border:1px solid #ccc;background:#fff;display:none" alt=""></div>
+    <div class="preview-result"><img id="preview-img" style="border:1px solid #ccc;background:#fff;display:none" alt=""></div>
   </div>
 </div>
 <script>
@@ -162,6 +163,24 @@ function registerFieldType(f) {
   hiprint.init({ providers: [new provider()] });
 }
 
+// 把画布元素实际使用的字段并入字段列表（加载/保存时调用），
+// 例如元素绑定了 {{ qr_string | [0] }}，字段列表里就该有对应项；显示名取元素标题
+function syncFieldsFromCanvas(designJson, live) {
+  ((designJson && designJson.panels) || []).forEach(p => (p.printElements || []).forEach(el => {
+    const o = el.options || {};
+    const f = o.field;
+    if (!f) return;
+    if (templateFields.some(x => x.name === f)) return;
+    const field = { name: f, title: o.title || f };
+    templateFields.push(field);
+    if (live) {
+      registerFieldType(field);
+      const $item = fieldPaletteItem(field);
+      $('#field-items').append($item);
+      hiprint.PrintElementTypeManager.buildByHtml($item);
+    }
+  }));
+}
 // 字段编辑状态：非空表示正在编辑已有字段（表单回填自该字段）
 let editingField = null;
 
@@ -186,8 +205,11 @@ function editField(f, $item) {
 function submitFieldEditor() {
   const name = $('#field-name').val().trim();
   const title = $('#field-title').val().trim() || name;
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    setStatus('字段名只能包含字母、数字、下划线', true);
+  // 字段名允许纯标识符（如 count）或 {{ }} 表达式（如 {{ qr_string | [0] }}）
+  const isIdent = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+  const isExpr = /^\{\{[\s\S]+\}\}$/.test(name);
+  if (!isIdent && !isExpr) {
+    setStatus('字段名需为标识符（字母/数字/下划线）或 {{ }} 表达式', true);
     return;
   }
   if (editingField) {
@@ -196,7 +218,8 @@ function submitFieldEditor() {
       setStatus('字段名已存在: ' + name, true);
       return;
     }
-    const nameChanged = name !== f.name;
+    const oldName = f.name;
+    const nameChanged = name !== oldName;
     f.name = name;
     f.title = title;
     $item.attr('tid', 'labelModule.' + name);
@@ -204,6 +227,16 @@ function submitFieldEditor() {
     if (nameChanged) {
       registerFieldType(f);
       hiprint.PrintElementTypeManager.buildByHtml($item);
+      // 同步画布上绑定旧字段名的元素（含表达式绑定的不动）
+      (hiprintTemplate.getPanel(0).printElements || []).forEach(el => {
+        if (el.options && el.options.field === oldName) {
+          el.options.field = name;
+          el.options.testData = '{{ ' + name + ' }}';
+          el.options.title = title;
+          if (el.printElementType) el.printElementType.title = title;
+          if (el.updateDesignViewFromOptions) el.updateDesignViewFromOptions();
+        }
+      });
     }
     setStatus('字段已更新（保存模板后生效）');
   } else {
@@ -247,7 +280,7 @@ function buildPalette() {
     });
   });
   $palette.append($('<div style="padding:8px 4px;font-size:12px;color:#888;line-height:1.6"></div>')
-    .text('提示：文本内容或字段名里可直接写表达式，如 {{ count }}个、{{ "回" if is_return else "" }}（条件判断）、{{ qr_string | [6] }}（按 | 切分取第 6 段，分隔符可自定义）。'));
+    .text('提示：文本内容或字段名里可直接写表达式，如 {{ count }}个、{{ is_return ? "回" : "" }}（条件判断）、{{ qr_string | [6] }}（按 | 切分取第 6 段，分隔符可自定义）。'));
 }
 
 // 画布上字段元素显示 {{ 字段名 }} 占位符，直观看清绑定关系；
@@ -271,7 +304,7 @@ function customizeOptionPanels() {
   // 固定文本：无字段名/测试数据；字段元素：无标题
   // 静态图片：无字段名；二维码（绑定字段的图片）：无图片地址
   const dropRules = {
-    text: (hasField) => hasField ? ['title'] : ['field', 'testData'],
+    text: (hasField) => hasField ? [] : ['field', 'testData'],
     image: (hasField) => hasField ? ['src'] : ['field'],
   };
   Object.entries(dropRules).forEach(([type, dropFor]) => {
@@ -373,6 +406,25 @@ function initDesigner(templateJson) {
   customizeOptionPanels();
   // 拖入新类型元素后补一次 patch（初始空白模板没有元素可取原型）
   $('#design-canvas').on('mouseup', customizeOptionPanels);
+  // 字段元素的「字段名/测试数据」只读：绑定关系由底部字段栏统一管理，面板仅查看
+  hinnn.event.on(hiprintTemplate.getPrintElementSelectEventKey(), (e) => {
+    // 字段元素的 字段名/测试数据/标题（显示名）只读，统一由底部字段栏修改；
+    // 固定文本没有这几个参数或标题可编辑（标题即其内容），不受影响
+    const el = e && e.printElement;
+    const hasField = !!(el && el.options && (el.options.field || (el.printElementType && el.printElementType.field)));
+    setTimeout(() => {
+      $('#PrintElementOptionSetting .hiprint-option-item').each(function () {
+        const label = $(this).find('.hiprint-option-item-label').text().trim();
+        const lock = label === '字段名' || label === '测试数据' || (hasField && label === '标题');
+        if (lock) {
+          $(this).find('input, select, textarea')
+            .prop('readonly', true)
+            .prop('disabled', true)
+            .css({ background: '#f0f0f0', color: '#666', cursor: 'not-allowed' });
+        }
+      });
+    }, 0);
+  });
   // 文本编辑提交后实时重新居中表头组
   const firstEl = (hiprintTemplate.getPanel(0).printElements || [])[0];
   if (firstEl && firstEl.templateId) {
@@ -390,6 +442,13 @@ function encodeSplitExpressions(html) {
       .map(b => b.toString(16).padStart(2, '0')).join('');
     return '{{ _x_' + field + '_' + hex + '_' + idx + ' }}';
   });
+}
+// C 风格三元 {{ 条件 ? 甲 : 乙 }} 转 Tera 的 Python 风格 {{ 甲 if 条件 else 乙 }}，
+// 用户按习惯写法即可（不支持嵌套）
+const TERNARY_RE = /\{\{\s*([^{}?:]+?)\s*\?\s*([^{}?:]+?)\s*:\s*([^{}]*?)\s*\}\}/g;
+function encodeTernary(html) {
+  return html.replace(TERNARY_RE, (m, cond, a, b) =>
+    '{{ ' + a.trim() + ' if ' + cond.trim() + ' else ' + b.trim() + ' }}');
 }
 // 占位符数据以画布上元素实际使用的字段为准（与字段面板的增删无关）：
 // 普通字段生成 {{ field }}；字段名直接写占位符表达式（如 {{ count }}个）的原样输出，由 Tera 替换
@@ -485,6 +544,7 @@ function buildTemplateHtml() {
   centerHeaderGroup(false);
   let json = hiprintTemplate.getJson();
   if (typeof json === 'string') json = JSON.parse(json);
+  syncFieldsFromCanvas(json, true);
   json.fields = templateFields;
   const $html = hiprintTemplate.getHtml(placeholderData(json));
   const $wrap = $('<div>').append($html);
@@ -502,7 +562,7 @@ function buildTemplateHtml() {
     + '#app { position: relative; width: ' + width + 'mm; height: ' + height + 'mm; overflow: hidden; }\n'
     + '</style>\n<style>\n' + collectHiprintCss() + '\n</style>\n</head>\n<body>\n'
     + '<div id="app">' + panelHtml + '</div>\n</body>\n</html>';
-  return { json, html: encodeSplitExpressions(doc) };
+  return { json, html: encodeTernary(encodeSplitExpressions(doc)) };
 }
 
 $('#btn-save').on('click', async () => {
@@ -543,6 +603,12 @@ $('#btn-preview').on('click', () => {
   renderPreview();
 });
 $('#preview-render').on('click', renderPreview);
+// JSON 编辑停顿 1 秒后自动重新渲染
+let previewTimer = null;
+$('#preview-json').on('input', () => {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(renderPreview, 1000);
+});
 $('#preview-close').on('click', () => $('#preview-mask').fadeOut(100));
 $('#preview-mask').on('click', e => {
   if (e.target.id === 'preview-mask') $('#preview-mask').fadeOut(100);
@@ -564,6 +630,8 @@ $(async () => {
     if (Array.isArray(record.design_json.fields) && record.design_json.fields.length) {
       templateFields = record.design_json.fields;
     }
+    // 画布上用到但字段列表没有的绑定，并入字段列表（保持两边一致）
+    syncFieldsFromCanvas(record.design_json, false);
     initDesigner(applyFieldPlaceholders(record.design_json));
     setStatus('已加载模板');
   } catch (e) {
