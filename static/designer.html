@@ -39,6 +39,7 @@
   <label style="font-size:13px">面板宽 <input id="panel-w" type="number" step="0.1" min="10" style="width:60px"> mm</label>
   <label style="font-size:13px">高 <input id="panel-h" type="number" step="0.1" min="10" style="width:60px"> mm</label>
   <button id="btn-panel">应用面板尺寸</button>
+  <label style="font-size:13px;display:flex;align-items:center;gap:4px" title="编辑文字或保存时，自动把 logo 和公司标题作为一组居中"><input type="checkbox" id="auto-center-header" checked> 表头自动居中</label>
   <span id="status"></span>
 </div>
 <div id="main">
@@ -278,6 +279,54 @@ function customizeOptionPanels() {
   });
 }
 
+// 表头组（logo + 公司标题）整体居中：按字体实测文本宽度，logo 与文字固定 8pt 间隔。
+// 用 options.role 标记两个元素（role 是普通字符串，随模板 JSON 持久化）；
+// 老模板没有 role 标记时回退为「无字段的图片」+「字号最大的固定文本」
+function measureTextPt(text, fontSize, fontWeight) {
+  if (!measureTextPt.ctx) {
+    const canvas = document.createElement('canvas');
+    measureTextPt.ctx = canvas.getContext && canvas.getContext('2d');
+  }
+  const ctx = measureTextPt.ctx;
+  if (ctx) {
+    ctx.font = (fontWeight || 400) + ' ' + (fontSize * 96 / 72) + 'px "Microsoft YaHei UI", sans-serif';
+    return ctx.measureText(text).width * 72 / 96;
+  }
+  // 无 canvas 环境的估算：CJK ≈ 1em，ASCII ≈ 0.55em
+  return [...String(text)].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? 1 : 0.55), 0) * fontSize;
+}
+
+// 表头自动居中开关（localStorage 持久化，默认开）
+function autoCenterHeader() {
+  return localStorage.getItem('qr_designer_auto_center') !== '0';
+}
+
+function centerHeaderGroup(live) {
+  if (!autoCenterHeader()) return;
+  const panel = hiprintTemplate && hiprintTemplate.getPanel(0);
+  if (!panel) return;
+  const els = panel.printElements || [];
+  const logo = els.find(e => e.options && e.options.role === 'header-logo')
+    || els.find(e => e.printElementType && e.printElementType.type === 'image' && !(e.options && e.options.field));
+  const title = els.find(e => e.options && e.options.role === 'header-title')
+    || els.filter(e => e.printElementType && e.printElementType.type === 'text' && !(e.options && e.options.field) && e.options && e.options.title)
+        .sort((a, b) => (b.options.fontSize || 0) - (a.options.fontSize || 0))[0];
+  if (!logo || !title) return;
+  logo.options.role = 'header-logo';
+  title.options.role = 'header-title';
+  const panelWPt = (panel.width || 150) * 72 / 25.4;
+  const gap = 8;
+  const textW = measureTextPt(title.options.title, title.options.fontSize || 17, title.options.fontWeight);
+  const logoW = logo.options.width;
+  logo.options.left = Math.max(0, (panelWPt - logoW - gap - textW) / 2);
+  title.options.left = logo.options.left + logoW + gap;
+  title.options.width = textW + 4;
+  if (live) {
+    logo.updateDesignViewFromOptions();
+    title.updateDesignViewFromOptions();
+  }
+}
+
 function initDesigner(templateJson) {
   hiprint.init({ providers: [new labelProvider()] });
   buildPalette();
@@ -306,6 +355,11 @@ function initDesigner(templateJson) {
   customizeOptionPanels();
   // 拖入新类型元素后补一次 patch（初始空白模板没有元素可取原型）
   $('#design-canvas').on('mouseup', customizeOptionPanels);
+  // 文本编辑提交后实时重新居中表头组
+  const firstEl = (hiprintTemplate.getPanel(0).printElements || [])[0];
+  if (firstEl && firstEl.templateId) {
+    hinnn.event.on('hiprintTemplateDataChanged_' + firstEl.templateId, () => centerHeaderGroup(true));
+  }
 }
 
 // 占位符数据以画布上元素实际使用的字段为准（与字段面板的增删无关）：
@@ -394,6 +448,7 @@ function collectHiprintCss() {
 }
 
 function buildTemplateHtml() {
+  centerHeaderGroup(false);
   let json = hiprintTemplate.getJson();
   if (typeof json === 'string') json = JSON.parse(json);
   json.fields = templateFields;
@@ -462,6 +517,9 @@ $('#preview-mask').on('click', e => {
 const templateId = new URLSearchParams(location.search).get('id') || 'default';
 
 $(async () => {
+  $('#auto-center-header')
+    .prop('checked', autoCenterHeader())
+    .on('change', function () { localStorage.setItem('qr_designer_auto_center', this.checked ? '1' : '0'); });
   try {
     const resp = await fetch('/api/templates/' + templateId);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
