@@ -250,24 +250,32 @@ function applyFieldPlaceholders(designJson) {
 // （面板是按 text 类原型共享构建的，在原型上按实例过滤，新拖入的元素同样生效）
 function customizeOptionPanels() {
   const panel = hiprintTemplate.getPanel(0);
-  const textEl = (panel.printElements || []).find(e => e.printElementType && e.printElementType.type === 'text');
-  if (!textEl) return;
-  const proto = Object.getPrototypeOf(textEl);
-  if (proto.__optionPanelPatched) return;
-  proto.__optionPanelPatched = true;
-  const original = proto.getConfigOptions;
-  proto.getConfigOptions = function () {
-    const cfg = original.call(this);
-    const hasField = !!((this.options && this.options.field) || (this.printElementType && this.printElementType.field));
-    const drop = hasField ? ['title'] : ['field', 'testData'];
-    return {
-      ...cfg,
-      tabs: (cfg.tabs || []).map(tab => ({
-        ...tab,
-        options: (tab.options || []).filter(o => !drop.includes(o.name)),
-      })),
-    };
+  // 固定文本：无字段名/测试数据；字段元素：无标题
+  // 静态图片：无字段名；二维码（绑定字段的图片）：无图片地址
+  const dropRules = {
+    text: (hasField) => hasField ? ['title'] : ['field', 'testData'],
+    image: (hasField) => hasField ? ['src'] : ['field'],
   };
+  Object.entries(dropRules).forEach(([type, dropFor]) => {
+    const el = (panel.printElements || []).find(e => e.printElementType && e.printElementType.type === type);
+    if (!el) return;
+    const proto = Object.getPrototypeOf(el);
+    if (proto.__optionPanelPatched) return;
+    proto.__optionPanelPatched = true;
+    const original = proto.getConfigOptions;
+    proto.getConfigOptions = function () {
+      const cfg = original.call(this);
+      const hasField = !!((this.options && this.options.field) || (this.printElementType && this.printElementType.field));
+      const drop = dropFor(hasField);
+      return {
+        ...cfg,
+        tabs: (cfg.tabs || []).map(tab => ({
+          ...tab,
+          options: (tab.options || []).filter(o => !drop.includes(o.name)),
+        })),
+      };
+    };
+  });
 }
 
 function initDesigner(templateJson) {
@@ -277,11 +285,27 @@ function initDesigner(templateJson) {
   hiprintTemplate = new hiprint.PrintTemplate({
     template: templateJson,
     settingContainer: '#PrintElementOptionSetting',
+    // 图片地址「选择」按钮：打开本地文件选择框，内容转 base64 内嵌进模板
+    onImageChooseClick: (target) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = () => {
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => target.refresh(reader.result, false);
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    },
   });
   $('#design-canvas').empty();
   hiprintTemplate.design('#design-canvas');
   syncPanelSizeInputs();
   customizeOptionPanels();
+  // 拖入新类型元素后补一次 patch（初始空白模板没有元素可取原型）
+  $('#design-canvas').on('mouseup', customizeOptionPanels);
 }
 
 // 占位符数据以画布上元素实际使用的字段为准（与字段面板的增删无关）：
