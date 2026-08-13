@@ -629,6 +629,9 @@ $(async () => {
     $('#tpl-name').text('— ' + record.name + (record.is_default ? '（默认）' : ''));
     if (Array.isArray(record.design_json.fields) && record.design_json.fields.length) {
       templateFields = record.design_json.fields;
+    } else {
+      // 新模板（未保存过）：不预置默认字段，只给一个演示字段，其余按需自行添加
+      templateFields = [{ name: 'part_no', title: '零件号' }];
     }
     // 画布上用到但字段列表没有的绑定，并入字段列表（保持两边一致）
     syncFieldsFromCanvas(record.design_json, false);
