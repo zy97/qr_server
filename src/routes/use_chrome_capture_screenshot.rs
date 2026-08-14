@@ -297,11 +297,15 @@ fn parse_label_viewport(value: &str) -> Result<Viewport, anyhow::Error> {
         anyhow::bail!("invalid label viewport: {value}");
     }
 
+    // 取整要保证 [x, x+w]/[y, y+h] 被完整覆盖：
+    // floor(x)+ceil(w) 可能小数对齐导致右/下边缘少约 1px，裁掉贴边的外框线
+    let x = parts[0].floor().max(0.0);
+    let y = parts[1].floor().max(0.0);
     Ok(Viewport {
-        x: parts[0].floor().max(0.0),
-        y: parts[1].floor().max(0.0),
-        width: parts[2].ceil(),
-        height: parts[3].ceil(),
+        x,
+        y,
+        width: (parts[0] + parts[2]).ceil() - x,
+        height: (parts[1] + parts[3]).ceil() - y,
         scale: 1.0,
     })
 }
@@ -725,6 +729,15 @@ mod tests {
         assert_eq!(viewport.width, 686.0);
         assert_eq!(viewport.height, 350.0);
         assert_eq!(viewport.scale, 1.0);
+    }
+
+    #[test]
+    fn viewport_fully_covers_fractional_rect() {
+        // floor(x)+ceil(w) 不允许比 x+w 小：贴边的外框线不能被裁掉
+        let viewport = parse_label_viewport("100.9,50.9,200.05,100.05").expect("parse viewport");
+
+        assert!(viewport.x + viewport.width >= 100.9 + 200.05);
+        assert!(viewport.y + viewport.height >= 50.9 + 100.05);
     }
 
     #[test]
