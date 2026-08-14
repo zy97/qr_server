@@ -136,7 +136,7 @@ labelProvider.prototype.addElementTypes = function (context) {
       { tid: 'labelModule.image', title: '图片', type: 'image', data: '', options: { width: 60, height: 40 } },
       { tid: 'labelModule.hline', title: '横线', type: 'hline', options: { width: 120 } },
       { tid: 'labelModule.vline', title: '竖线', type: 'vline', options: { height: 120 } },
-      { tid: 'labelModule.rect',  title: '矩形', type: 'rect', options: { width: 120, height: 40, zIndex: -1 } },
+      { tid: 'labelModule.rect',  title: '矩形', type: 'rect', options: { width: 120, height: 40, zIndex: 0 } },
     ]),
   ]);
 };
@@ -606,10 +606,10 @@ function collectHiprintCss() {
 }
 
 function buildTemplateHtml() {
-  // 矩形置底：hiprint 按 (top,left) 决定层叠顺序，数组顺序无效；
-  // rect 只有边框无填充，z-index: -1 压到最底不影响视觉，避免压住文本导致点选不到
+  // 层叠规则：矩形框置底（zIndex 0），内容元素在上（zIndex 1）。
+  // 不能用负数 z-index——会把矩形压到画布背景下面导致边框不可见
   (hiprintTemplate.getPanel(0).printElements || []).forEach(e => {
-    if (e.printElementType && e.printElementType.type === 'rect') e.options.zIndex = -1;
+    e.options.zIndex = (e.printElementType && e.printElementType.type === 'rect') ? 0 : 1;
   });
   centerHeaderGroup(false);
   let json = hiprintTemplate.getJson();
