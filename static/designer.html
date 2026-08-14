@@ -388,6 +388,42 @@ function autoCenterHeader() {
   return localStorage.getItem('qr_designer_auto_center') !== '0';
 }
 
+// 对齐相邻元素的共享边：相距 1pt 以内的边缘吸附到同一位置，
+// 并对齐到整像素网格（0.75pt），避免亚像素渲染缝隙
+function alignElementEdges() {
+  const panel = hiprintTemplate && hiprintTemplate.getPanel(0);
+  if (!panel) return;
+  const els = (panel.printElements || []).filter(e =>
+    e.options && typeof e.options.left === 'number' && typeof e.options.top === 'number');
+  const snapAxis = (startKey, sizeKey) => {
+    const marks = [];
+    els.forEach(e => {
+      marks.push({ v: e.options[startKey], el: e, start: true });
+      marks.push({ v: e.options[startKey] + (e.options[sizeKey] || 0), el: e, start: false });
+    });
+    marks.sort((a, b) => a.v - b.v);
+    let group = [];
+    const flush = () => {
+      if (!group.length) return;
+      // 吸附到整像素网格（1px = 0.75pt）：避免边缘落在两个物理像素之间产生渲染缝隙
+      const mean = group.reduce((s, m) => s + m.v, 0) / group.length;
+      const snapped = Math.round(mean / 0.75) * 0.75;
+      group.forEach(m => {
+        if (m.start) m.el.options[startKey] = snapped;
+        else m.el.options[sizeKey] = Math.max(1, snapped - m.el.options[startKey]);
+      });
+      group = [];
+    };
+    marks.forEach(m => {
+      if (group.length && m.v - group[group.length - 1].v > 1) flush();
+      group.push(m);
+    });
+    flush();
+  };
+  snapAxis('left', 'width');
+  snapAxis('top', 'height');
+}
+
 function centerHeaderGroup(live) {
   if (!autoCenterHeader()) return;
   const panel = hiprintTemplate && hiprintTemplate.getPanel(0);
@@ -452,11 +488,12 @@ function initDesigner(templateJson) {
   })();
   $('#design-canvas').empty();
   hiprintTemplate.design('#design-canvas');
+  normalizeSharedBorders(document.querySelector('#design-canvas'));
   syncPanelSizeInputs();
   customizeOptionPanels();
   markFieldElements();
   // 拖入新类型元素后补一次 patch（初始空白模板没有元素可取原型）
-  $('#design-canvas').on('mouseup', () => { customizeOptionPanels(); markFieldElements(); });
+  $('#design-canvas').on('mouseup', () => { customizeOptionPanels(); markFieldElements(); normalizeSharedBorders(document.querySelector('#design-canvas')); });
   // 字段元素的「字段名/测试数据」只读：绑定关系由底部字段栏统一管理，面板仅查看
   hinnn.event.on(hiprintTemplate.getPrintElementSelectEventKey(), (e) => {
     // 字段元素的 字段名/测试数据/标题（显示名）只读，统一由底部字段栏修改；
@@ -479,7 +516,17 @@ function initDesigner(templateJson) {
   // 文本编辑提交后实时重新居中表头组
   const firstEl = (hiprintTemplate.getPanel(0).printElements || [])[0];
   if (firstEl && firstEl.templateId) {
-    hinnn.event.on('hiprintTemplateDataChanged_' + firstEl.templateId, () => centerHeaderGroup(true));
+    hinnn.event.on('hiprintTemplateDataChanged_' + firstEl.templateId, (type) => {
+    centerHeaderGroup(true);
+    // 拖动结束后吸附共享边，画布即时拼齐
+    if (type === '移动' || type === '新增') {
+      alignElementEdges();
+      (hiprintTemplate.getPanel(0).printElements || []).forEach(e => {
+        if (e.updateDesignViewFromOptions) e.updateDesignViewFromOptions();
+      });
+    }
+    normalizeSharedBorders(document.querySelector('#design-canvas'));
+  });
   }
 }
 
@@ -621,6 +668,83 @@ function collectHiprintCss() {
   }).join('\n');
 }
 
+
+// 统一共享网格线的绘制侧，消除交汇处的 1px 台阶：
+// 单元格用 border-bottom/right 画线，矩形框（rect）由 CSS 类规则四边都画。
+// 同一条网格线上同时存在 top/left 与 bottom/right 两种画法的线段时，
+// border-box 内缩方向相反，Chrome 会把它们光栅化到相邻的两个像素行/列，形成台阶。
+// 做法：top 边若被同坐标、范围全覆盖的邻居 bottom 边承接，则移过去（left 同理移给左邻居的 right），
+// 保证每条网格线只由同一种边绘制。画布上元素可能反复拖动，每次先从 _normBorders 还原再重算。
+function normalizeSharedBorders(container) {
+  const EPS = 0.45; // pt 容差
+  const KEY = '_normBorders';
+  container.querySelectorAll('.hiprint-printElement').forEach(el => {
+    const saved = el[KEY];
+    if (!saved) return;
+    Object.entries(saved).forEach(([p, v]) => { el.style[p] = v; });
+    delete el[KEY];
+  });
+  const els = [...container.querySelectorAll('.hiprint-printElement')].map(el => {
+    const cs = getComputedStyle(el);
+    const num = v => parseFloat(v) || 0;
+    const drawn = side => cs['border' + side + 'Style'] !== 'none' && num(cs['border' + side + 'Width']) > 0;
+    return {
+      el,
+      left: num(el.style.left), top: num(el.style.top),
+      right: num(el.style.left) + num(el.style.width),
+      bottom: num(el.style.top) + num(el.style.height),
+      T: drawn('Top'), R: drawn('Right'), B: drawn('Bottom'), L: drawn('Left'),
+    };
+  });
+  const covers = (from, to, ivals) => {
+    ivals.sort((a, b) => a[0] - b[0]);
+    let cur = from;
+    for (const iv of ivals) {
+      if (iv[0] > cur + EPS) return false;
+      cur = Math.max(cur, iv[1]);
+      if (cur >= to - EPS) return true;
+    }
+    return cur >= to - EPS;
+  };
+  const remember = (el, props) => {
+    el[KEY] = el[KEY] || {};
+    props.forEach(p => { if (!(p in el[KEY])) el[KEY][p] = el.style[p]; });
+  };
+  els.forEach(e => {
+    if (e.T) {
+      const nb = els.filter(o => Math.abs(o.bottom - e.top) < EPS && o.left < e.right - EPS && o.right > e.left + EPS);
+      if (nb.length && covers(e.left, e.right, nb.map(o => [o.left, o.right]))) {
+        const w = getComputedStyle(e.el).borderTopWidth, c = getComputedStyle(e.el).borderTopColor;
+        remember(e.el, ['borderTopStyle', 'borderTopWidth']);
+        e.el.style.borderTopStyle = 'none';
+        e.el.style.borderTopWidth = '0px';
+        nb.forEach(o => {
+          if (!o.B) {
+            remember(o.el, ['borderBottomWidth', 'borderBottomStyle', 'borderBottomColor']);
+            o.el.style.borderBottom = w + ' solid ' + c;
+            o.B = true;
+          }
+        });
+      }
+    }
+    if (e.L) {
+      const nb = els.filter(o => Math.abs(o.right - e.left) < EPS && o.top < e.bottom - EPS && o.bottom > e.top + EPS);
+      if (nb.length && covers(e.top, e.bottom, nb.map(o => [o.top, o.bottom]))) {
+        const w = getComputedStyle(e.el).borderLeftWidth, c = getComputedStyle(e.el).borderLeftColor;
+        remember(e.el, ['borderLeftStyle', 'borderLeftWidth']);
+        e.el.style.borderLeftStyle = 'none';
+        e.el.style.borderLeftWidth = '0px';
+        nb.forEach(o => {
+          if (!o.R) {
+            remember(o.el, ['borderRightWidth', 'borderRightStyle', 'borderRightColor']);
+            o.el.style.borderRight = w + ' solid ' + c;
+            o.R = true;
+          }
+        });
+      }
+    }
+  });
+}
 function buildTemplateHtml() {
   // 层叠规则：矩形框置底（zIndex 0），内容元素在上（zIndex 1）。
   // 不能用负数 z-index——会把矩形压到画布背景下面导致边框不可见
@@ -628,6 +752,11 @@ function buildTemplateHtml() {
     e.options.zIndex = (e.printElementType && e.printElementType.type === 'rect') ? 0 : 1;
   });
   centerHeaderGroup(false);
+  alignElementEdges();
+  // 画布同步显示对齐后的位置
+  (hiprintTemplate.getPanel(0).printElements || []).forEach(e => {
+    if (e.updateDesignViewFromOptions) e.updateDesignViewFromOptions();
+  });
   let json = hiprintTemplate.getJson();
   if (typeof json === 'string') json = JSON.parse(json);
   syncFieldsFromCanvas(json, true);
@@ -635,6 +764,10 @@ function buildTemplateHtml() {
   json.fields = templateFields;
   const $html = hiprintTemplate.getHtml(placeholderData(json));
   const $wrap = $('<div>').append($html);
+  // 挂到文档上才能取计算样式（rect 边框来自 CSS 类规则），规范化共享边后取下
+  $wrap.css({ position: 'absolute', left: '-100000px', top: '0', visibility: 'hidden' }).appendTo(document.body);
+  normalizeSharedBorders($wrap[0]);
+  $wrap.detach();
   // 纯展示模板：去掉可聚焦属性（点击会出现焦点高亮框）和浏览器打印用的 @page 块
   $wrap.find('[tabindex]').removeAttr('tabindex');
   $wrap.find('style[printstyle]').remove();
