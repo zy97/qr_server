@@ -109,7 +109,6 @@ labelProvider.prototype.addElementTypes = function (context) {
   context.addPrintElementTypes('labelModule', [
     new hiprint.PrintElementTypeGroup('标签字段', fieldEls),
     new hiprint.PrintElementTypeGroup('基础元素', [
-      { tid: 'labelModule.qrCode', title: '二维码', type: 'image', field: 'qr_code', options: { width: 80, height: 80 } },
       { tid: 'labelModule.text',  title: '固定文本', type: 'text', data: '文本', options: { width: 80, height: 24, fontSize: 10.5, fontWeight: '700' } },
       { tid: 'labelModule.image', title: '图片', type: 'image', data: '', options: { width: 60, height: 40 } },
       { tid: 'labelModule.hline', title: '横线', type: 'hline', options: { width: 120 } },
@@ -264,7 +263,6 @@ function buildPalette() {
   const groups = [
     { title: '标签字段', items: null },
     { title: '基础元素', items: [
-      { tid: 'labelModule.qrCode', title: '二维码' },
       { tid: 'labelModule.text', title: '固定文本' },
       { tid: 'labelModule.image', title: '图片' },
       { tid: 'labelModule.hline', title: '横线' },
@@ -285,7 +283,7 @@ function buildPalette() {
     });
   });
   $palette.append($('<div style="padding:8px 4px;font-size:12px;color:#888;line-height:1.6"></div>')
-    .text('提示：文本内容或字段名里可直接写表达式，如 {{ count }}个、{{ is_return ? "回" : "" }}（条件判断）、{{ qr_string | [6] }}（按 | 切分取第 6 段，分隔符可自定义）。'));
+    .text('提示：文本内容或字段名里可直接写表达式：{{ count }}个、{{ is_return ? "回" : "" }}（条件判断）、{{ qr_string | [6] }}（按 | 切分取第 6 段，分隔符可自定义）、{{ order_no@qr }}（转二维码）、{{ order_no@条形码 }}（转一维码）。'));
 }
 
 // 画布上字段元素显示 {{ 字段名 }} 占位符，直观看清绑定关系；
@@ -455,6 +453,16 @@ function encodeTernary(html) {
   return html.replace(TERNARY_RE, (m, cond, a, b) =>
     '{{ ' + a.trim() + ' if ' + cond.trim() + ' else ' + b.trim() + ' }}');
 }
+// 字段转码表达式：{{ 字段@qr }} / {{ 字段@条形码 }}（兼容 @qrcode/@barcode）
+// 编译为 {{ _qr_字段 | safe }} / {{ _bar_字段 | safe }}，后端把字段值生成对应图片（<img> 标签），
+// 写在文本元素里即可，元素盒子大小即图片大小
+const CODE_EXPR_RE = /\{\{\s*([A-Za-z_]\w*)\s*@(qr|qrcode|条形码|barcode)\s*\}\}/g;
+function encodeCodeExpressions(html) {
+  return html.replace(CODE_EXPR_RE, (m, field, kind) => {
+    const prefix = (kind === 'qr' || kind === 'qrcode') ? '_qr_' : '_bar_';
+    return '{{ ' + prefix + field + ' | safe }}';
+  });
+}
 // 占位符数据以画布上元素实际使用的字段为准（与字段面板的增删无关）：
 // 普通字段生成 {{ field }}；字段名直接写占位符表达式（如 {{ count }}个）的原样输出，由 Tera 替换
 function placeholderData(templateJson) {
@@ -592,7 +600,7 @@ function buildTemplateHtml() {
     + '#app { position: relative; width: ' + width + 'mm; height: ' + height + 'mm; overflow: hidden; }\n'
     + '</style>\n<style>\n' + collectHiprintCss() + '\n</style>\n</head>\n<body>\n'
     + '<div id="app">' + panelHtml + '</div>\n</body>\n</html>';
-  return { json, html: encodeTernary(encodeSplitExpressions(doc)) };
+  return { json, html: encodeTernary(encodeCodeExpressions(encodeSplitExpressions(doc))) };
 }
 
 $('#btn-save').on('click', async () => {

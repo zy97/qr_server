@@ -287,23 +287,27 @@ pub fn render_html_for(conn: &Connection, selector: Option<&str>) -> Result<Stri
             .map_err(CustomError::from)
     };
     match selector {
-        None => row("SELECT render_html FROM templates WHERE is_default = 1", None),
-        Some(s) if s.parse::<i64>().is_ok() => {
-            row("SELECT render_html FROM templates WHERE id = ?1", Some(s.to_string()))
-        }
+        None => row(
+            "SELECT render_html FROM templates WHERE is_default = 1",
+            None,
+        ),
+        Some(s) if s.parse::<i64>().is_ok() => row(
+            "SELECT render_html FROM templates WHERE id = ?1",
+            Some(s.to_string()),
+        ),
         Some(s) => row(
             "SELECT render_html FROM templates WHERE name = ?1 ORDER BY updated_at DESC LIMIT 1",
             Some(s.to_string()),
         ),
     }
     .map_err(|e| match e {
-        CustomError::DbError(_) => {
-            CustomError::OtherLibraryError(format!("模板不存在: {}", selector.unwrap_or("<default>")))
-        }
+        CustomError::DbError(_) => CustomError::OtherLibraryError(format!(
+            "模板不存在: {}",
+            selector.unwrap_or("<default>")
+        )),
         other => other,
     })
 }
-
 
 /// 供路由层使用的全局连接
 pub fn with_db<T>(f: impl FnOnce(&Connection) -> Result<T, CustomError>) -> Result<T, CustomError> {
@@ -379,17 +383,20 @@ mod tests {
         let new_id = create(&conn, "新模板").expect("create");
         let default = get(&conn, None).expect("default");
 
-        assert!(render_html_for(&conn, None).expect("default").contains("{{ part_no }}"));
+        assert!(render_html_for(&conn, None)
+            .expect("default")
+            .contains("{{ part_no }}"));
         assert_eq!(
             render_html_for(&conn, Some(&default.id.to_string())).expect("by id"),
             render_html_for(&conn, None).expect("default")
         );
-        assert!(render_html_for(&conn, Some("新模板")).expect("by name").contains("id=\"app\""));
+        assert!(render_html_for(&conn, Some("新模板"))
+            .expect("by name")
+            .contains("id=\"app\""));
         assert!(render_html_for(&conn, Some("9999")).is_err());
         assert!(render_html_for(&conn, Some("不存在")).is_err());
         let _ = new_id;
     }
-
 
     #[test]
     fn default_template_cannot_be_deleted() {

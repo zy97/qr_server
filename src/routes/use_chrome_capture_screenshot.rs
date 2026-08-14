@@ -19,7 +19,9 @@ const BROWSER_WINDOW_HEIGHT: u32 = 500;
 /// 每次请求从数据库读取默认模板的渲染 HTML 构建 Tera：
 /// 设计器保存/切换默认模板后立即生效（解析毫秒级，相对浏览器截图耗时可忽略）
 fn load_templates(selector: Option<&str>) -> Result<(Tera, String), CustomError> {
-    let html = crate::template_store::with_db(|conn| crate::template_store::render_html_for(conn, selector))?;
+    let html = crate::template_store::with_db(|conn| {
+        crate::template_store::render_html_for(conn, selector)
+    })?;
     let tera = templates_from_html(&html)?;
     Ok((tera, html))
 }
@@ -342,10 +344,14 @@ fn build_template_context(
             ("date", parts[5]),
             ("box_no", parts[6]),
         ] {
-            map.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+            map.insert(
+                key.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
         }
     }
     apply_split_variables(&mut map, template_html);
+    apply_image_variables(&mut map, template_html);
     fill_missing_variables(&mut map, template_html);
 
     let mut context = Context::from_serialize(&serde_json::Value::Object(map))?;
@@ -413,6 +419,66 @@ fn decode_hex(hex: &str) -> Option<Vec<u8>> {
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
         .collect()
 }
+/// 模板里 {{ _qr_<字段> }} / {{ _bar_<字段> }} 变量（由 {{ 字段@qr }} / {{ 字段@条形码 }} 编译而来）：
+/// 把对应字段值生成为二维码/一维码图片，值为完整 <img> 标签（模板里以 | safe 输出）
+fn apply_image_variables(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    template_html: &str,
+) {
+    for (marker, is_qr) in [("{{ _qr_", true), ("{{ _bar_", false)] {
+        let mut rest = template_html;
+        while let Some(start) = rest.find(marker) {
+            let after = &rest[start + marker.len()..];
+            let Some(end) = after.find("}}") else { break };
+            let var = after[..end].trim();
+            rest = &after[end + 2..];
+            // var 形如 _qr_qr_string 或 _qr_qr_string | safe
+            let field = var.split('|').next().unwrap_or("").trim();
+            let name = if is_qr {
+                format!("_qr_{field}")
+            } else {
+                format!("_bar_{field}")
+            };
+            let value = map.get(field).and_then(|v| v.as_str()).unwrap_or_default();
+            let img = if value.is_empty() {
+                String::new()
+            } else {
+                let uri = if is_qr {
+                    qr_code_data_uri(value)
+                } else {
+                    barcode_data_uri(value)
+                };
+                match uri {
+                    Ok(uri) => format!(
+                        r#"<img src="{uri}" style="width:100%;height:100%;object-fit:contain">"#
+                    ),
+                    Err(_) => String::new(),
+                }
+            };
+            map.insert(name.to_string(), serde_json::Value::String(img));
+        }
+    }
+}
+
+/// Code128 一维码 → PNG data URI
+fn barcode_data_uri(content: &str) -> Result<String, CustomError> {
+    // barcoders 的 Code128 要求数据以字符集标记开头：À=A Ɓ=B(可打印 ASCII) Ć=C(纯数字)
+    let data = match content.chars().next() {
+        Some('À') | Some('Ɓ') | Some('Ć') => content.to_string(),
+        _ => format!("Ɓ{content}"),
+    };
+    let barcode = barcoders::sym::code128::Code128::new(data)
+        .map_err(|e| CustomError::OtherLibraryError(format!("条形码内容非法: {e}")))?;
+    let encoded = barcode.encode();
+    let png = barcoders::generators::image::Image::png(60);
+    let bytes = png
+        .generate(&encoded[..])
+        .map_err(|e| CustomError::OtherLibraryError(format!("条形码生成失败: {e}")))?;
+    Ok(format!(
+        "data:image/png;base64,{}",
+        general_purpose::STANDARD.encode(bytes)
+    ))
+}
 
 /// 模板里 {{ 标识符 }} 形式的变量在上下文中缺失时补空串，
 /// 避免单个字段缺失导致整单渲染失败（拆分变量由 apply_split_variables 处理，此处跳过）
@@ -451,9 +517,18 @@ mod tests {
 
     #[test]
     fn print_query_flag_overrides_config() {
-        let default = LabelQuery { print: None, template: None };
-        let off = LabelQuery { print: Some(false), template: None };
-        let on = LabelQuery { print: Some(true), template: None };
+        let default = LabelQuery {
+            print: None,
+            template: None,
+        };
+        let off = LabelQuery {
+            print: Some(false),
+            template: None,
+        };
+        let on = LabelQuery {
+            print: Some(true),
+            template: None,
+        };
         assert!(should_print(true, &default));
         assert!(!should_print(false, &default));
         assert!(!should_print(true, &off));
@@ -560,6 +635,36 @@ mod tests {
             .expect("add raw template");
 
         assert_eq!(tera.render("t", &context).expect("render"), "P-001|");
+    }
+
+    #[test]
+    fn renders_qr_and_barcode_variables() {
+        // {{ _qr_order_no }} / {{ _bar_order_no }}：字段值生成二维码/一维码图片
+        let context = build_template_context(
+            &sample_label(),
+            "{{ _qr_order_no | safe }}#{{ _bar_order_no | safe }}",
+        )
+        .expect("build context");
+        let mut tera = Tera::default();
+        tera.add_raw_template("t", "{{ _qr_order_no | safe }}#{{ _bar_order_no | safe }}")
+            .expect("add raw template");
+        let rendered = tera.render("t", &context).expect("render");
+        let parts: Vec<&str> = rendered.split('#').collect();
+        dbg!(&rendered);
+        assert!(parts[0].contains("data:image/png;base64,"));
+        assert!(parts[1].contains("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn barcode_data_uri_generates_png() {
+        let uri = barcode_data_uri("123456").expect("barcode should encode");
+        let bytes = general_purpose::STANDARD
+            .decode(
+                uri.strip_prefix("data:image/png;base64,")
+                    .expect("data uri"),
+            )
+            .expect("decode");
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
     }
 
     #[test]

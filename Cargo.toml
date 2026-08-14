@@ -11,6 +11,7 @@ typst = [
 ]
 chrome = [
     "dep:anyhow",
+    "dep:barcoders",
     "dep:chromiumoxide",
     "dep:futures",
     "dep:image",
@@ -19,6 +20,7 @@ chrome = [
     "dep:tokio",
 ]
 agent-browser = [
+    "dep:barcoders",
     "dep:image",
     "dep:qrcode",
     "dep:tera",
@@ -33,6 +35,7 @@ futures = { version = "0.3", optional = true }
 
 image = { version = "0.25", optional = true }
 qrcode = { version = "0.14.1", optional = true }
+barcoders = { version = "1", features = ["image"], optional = true }
 serde = { version = "1", features = ["derive"] }
 tera = { version = "2.1.0", default-features = false, optional = true }
 thiserror = "2"
