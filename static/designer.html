@@ -20,6 +20,16 @@
   #toolbar button:hover { background: #357ab8; }
   #status { margin-left: auto; font-size: 13px; }
   #main { display: flex; height: calc(100% - 45px - 48px); }
+  body.hide-ruler .hiprint_rul_wrapper { display: none; }
+  /* 虚线框开关：隐藏字段标记虚线 + hiprint 设计模式给所有元素加的虚线边框 */
+  body.hide-outline #design-canvas .field-bound > .hiprint-printElement-text-content,
+  body.hide-outline #design-canvas .field-bound > .hiprint-printElement-image-content { outline: none; }
+  body.hide-outline #design-canvas .hiprint-printPaper.design { border: none; }
+  body.hide-outline #design-canvas .design .hiprint-printElement-text-content,
+  body.hide-outline #design-canvas .design .hiprint-printElement-longText-content,
+  body.hide-outline #design-canvas .design .hiprint-printElement-html-content,
+  body.hide-outline #design-canvas .design .hiprint-printElement-image-content,
+  body.hide-outline #design-canvas .design .hiprint-printElement-table-content { border: none !important; }
   #field-bar { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px; border-top: 1px solid #ccc; background: #f7f7f7; box-sizing: border-box; }
   /* 字段绑定元素：文字蓝色 + 虚线框（仅设计器内区分类型，不进渲染产物） */
   #design-canvas .field-bound > .hiprint-printElement-text-content,
@@ -47,6 +57,8 @@
   <label style="font-size:13px">高 <input id="panel-h" type="number" step="0.1" min="10" style="width:60px"> mm</label>
   <button id="btn-panel">应用面板尺寸</button>
   <label style="font-size:13px;display:flex;align-items:center;gap:4px" title="编辑文字或保存时，自动把 logo 和公司标题作为一组居中"><input type="checkbox" id="auto-center-header" checked> 表头自动居中</label>
+  <label style="font-size:13px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="toggle-ruler" checked> 显示刻度</label>
+  <label style="font-size:13px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="toggle-outline" checked> 虚线框</label>
   <span id="hint-toggle" title="语法说明" style="cursor:pointer;color:#9fc3e8;border:1px solid #9fc3e8;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;user-select:none">?</span>
   <span id="status"></span>
 </div>
@@ -674,7 +686,20 @@ $('#preview-mask').on('click', e => {
 
 const templateId = new URLSearchParams(location.search).get('id') || 'default';
 
+// 布局偏好：显示面板（左侧字段栏+顶部工具栏）、字段虚线框，均记忆在 localStorage
+function applyLayoutPrefs() {
+  document.body.classList.toggle('hide-ruler', localStorage.getItem('qr_designer_ruler') === '0');
+  document.body.classList.toggle('hide-outline', localStorage.getItem('qr_designer_outline') === '0');
+}
+
 $(async () => {
+  $('#toggle-ruler')
+    .prop('checked', localStorage.getItem('qr_designer_ruler') !== '0')
+    .on('change', function () { localStorage.setItem('qr_designer_ruler', this.checked ? '1' : '0'); applyLayoutPrefs(); });
+  $('#toggle-outline')
+    .prop('checked', localStorage.getItem('qr_designer_outline') !== '0')
+    .on('change', function () { localStorage.setItem('qr_designer_outline', this.checked ? '1' : '0'); applyLayoutPrefs(); });
+  applyLayoutPrefs();
   $('#hint-toggle').on('click', (e) => { e.stopPropagation(); $('#hint-pop').toggle(); });
   $(document).on('click', (e) => { if (!$(e.target).closest('#hint-pop, #hint-toggle').length) $('#hint-pop').hide(); });
   $('#btn-field-save').on('click', submitFieldEditor);
