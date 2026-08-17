@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "qr_service"
-version = "0.2.0"
+version = "0.3.0"
 description = "标签模板设计与打印服务"
 repository = "https://github.com/zy97/qr_server"
 
