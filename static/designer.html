@@ -456,19 +456,31 @@ function centerHeaderGroup(live) {
 // mousemove（stopPropagation 后冒泡监听收不到事件），按住左键移动超过阈值才放行、开始拖动
 (function () {
   const DRAG_THRESHOLD_PX = 4;
-  let armed = false, startX = 0, startY = 0;
+  let armed = false, exceeded = false, startX = 0, startY = 0;
+  let targetEl = null, savedLeft = '', savedTop = '';
   document.addEventListener('mousedown', e => {
-    armed = e.button === 0 && !!(e.target.closest && e.target.closest('#design-canvas .hiprint-printElement'));
-    if (armed) { startX = e.pageX; startY = e.pageY; }
+    targetEl = (e.button === 0 && e.target.closest) ? e.target.closest('#design-canvas .hiprint-printElement') : null;
+    armed = !!targetEl; exceeded = false;
+    if (armed) { startX = e.pageX; startY = e.pageY; savedLeft = targetEl.style.left; savedTop = targetEl.style.top; }
   }, true);
   document.addEventListener('mousemove', e => {
-    if (armed
-      && Math.abs(e.pageX - startX) < DRAG_THRESHOLD_PX
+    if (!armed) return;
+    if (Math.abs(e.pageX - startX) < DRAG_THRESHOLD_PX
       && Math.abs(e.pageY - startY) < DRAG_THRESHOLD_PX) {
       e.stopPropagation();
+    } else {
+      exceeded = true;
     }
   }, true);
-  document.addEventListener('mouseup', () => { armed = false; }, true);
+  document.addEventListener('mouseup', () => {
+    // 未构成拖动时 hidraggable 的 mouseup 仍会把元素内联位置取整到 1.5pt 网格
+    // （position() 整数 px + 网格取整的双重误差，options 不变、仅 DOM 偏移）——恢复原值
+    if (armed && !exceeded && targetEl) {
+      const el = targetEl, l = savedLeft, t = savedTop;
+      setTimeout(() => { el.style.left = l; el.style.top = t; }, 0);
+    }
+    armed = false; exceeded = false; targetEl = null;
+  }, true);
 })();
 
 
