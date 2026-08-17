@@ -29,12 +29,37 @@ if ($existing) {
     sc.exe delete $serviceName | Out-Null
 }
 
-if (-not $Version) {
-    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
-    $Version = $release.tag_name.TrimStart('v')
+# tag 可能是按包发布的 print-agent/vX.Y.Z，也可能是统一发布的 vX.Y.Z；
+# 直接用完整 tag 拼下载地址，不做任何裁剪
+function Resolve-LatestTag {
+    $tags = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases") | ForEach-Object { $_.tag_name }
+    $byPkg = @($tags | Where-Object { $_ -match "^print-agent/v?\d+\.\d+\.\d+" })
+    if ($byPkg.Count) { return ($byPkg | Sort-Object { [version]($_ -replace "^print-agent/v?", "") } | Select-Object -Last 1) }
+    $unified = @($tags | Where-Object { $_ -match "^v?\d+\.\d+\.\d+" })
+    if ($unified.Count) { return ($unified | Sort-Object { [version]($_ -replace "^v", "") } | Select-Object -Last 1) }
+    throw "未找到任何 Release（api.github.com 不可达？），可显式指定 -Version"
 }
+function Resolve-UserTag([string]$v) {
+    if ($v.Contains('/')) { return $v }
+    $bare = $v.TrimStart('v')
+    foreach ($cand in @("print-agent/v$bare", "v$bare")) {
+        try {
+            Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/$cand" | Out-Null
+            return $cand
+        } catch {}
+    }
+    throw "找不到版本 $v 对应的 Release（试过 print-agent/v$bare 和 v$bare）"
+}
+
+if ($Version) {
+    $tag = Resolve-UserTag $Version
+} else {
+    Write-Host "查询最新 Release..."
+    $tag = Resolve-LatestTag
+}
+Write-Host "使用 Release: $tag"
 $asset = "print-agent-x86_64-pc-windows-msvc.zip"
-$url = "https://github.com/$repo/releases/download/v$Version/$asset"
+$url = "https://github.com/$repo/releases/download/$tag/$asset"
 Write-Host "下载 $url"
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
 $zip = Join-Path $env:TEMP $asset

@@ -2,18 +2,19 @@
 # qr_service 一键安装（标签模板设计与渲染服务，Linux 服务器）
 # 用法：
 #   curl -fsSL https://raw.githubusercontent.com/zy97/qr_server/master/scripts/install-qr-service.sh | sudo bash
-#   或: sudo ./install-qr-service.sh 0.1.0
+#   或: sudo ./install-qr-service.sh 0.3.0        （也接受 v0.3.0 / qr_service/v0.3.0）
 # 重复执行即升级：会先停服务、替换二进制、再启动；已有 config.toml / templates/templates.db 不会被覆盖
 #
 # 国内服务器访问 GitHub Release 容易超时，可用 GH_PROXY 代理前缀（末尾带 /）：
 #   GH_PROXY="https://ghfast.top/" curl -fsSL .../install-qr-service.sh | sudo -E bash
 set -euo pipefail
 
-VERSION="${1:-}"                       # 如 0.1.0；留空取 GitHub 最新 Release
 REPO="zy97/qr_server"
 INSTALL_DIR="/opt/qr_service"
 SERVICE_NAME="qr_service"
-GH_PROXY="${GH_PROXY:-}"               # GitHub 下载代理前缀，如 https://ghfast.top/
+PKG_PREFIX="qr_service"              # 本脚本安装qr_service的包：优先匹配 qr_service/vX.Y.Z 形式的 Release
+ASSET="qr_service-x86_64-unknown-linux-gnu.tar.xz"
+GH_PROXY="${GH_PROXY:-}"             # GitHub 下载代理前缀，如 https://ghfast.top/
 
 if [[ $EUID -ne 0 ]]; then
     echo "请用 root 运行（sudo）" >&2
@@ -25,22 +26,53 @@ dl() {
     curl -fL --connect-timeout 15 --retry 3 --retry-delay 2 "$@"
 }
 
-if [[ -z "$VERSION" ]]; then
-    echo "==> 查询最新 Release 版本..."
-    VERSION=$(dl -s "https://api.github.com/repos/$REPO/releases/latest" | grep -oP '"tag_name":\s*"\Kv?[^"]+' | sed 's/^v//')
-fi
-if [[ -z "$VERSION" ]]; then
-    echo "获取版本号失败（api.github.com 不可达？），可显式指定版本: sudo ./install-qr-service.sh 0.1.0" >&2
+# 列出所有 Release 的 tag（含按包发布的 包名/vX.Y.Z 形式）
+list_tags() {
+    dl -s "https://api.github.com/repos/$REPO/releases" | grep -oP '"tag_name":\s*"\K[^"]+'
+}
+
+# 解析用户指定的版本：接受 0.3.0 / v0.3.0 / qr_service/v0.3.0，验证 Release 真实存在
+resolve_user_tag() {
+    local arg="$1" bare cand
+    [[ "$arg" == */* ]] && { echo "$arg"; return; }
+    bare="${arg#v}"
+    for cand in "$PKG_PREFIX/v$bare" "v$bare"; do
+        if [[ $(curl -s -o /dev/null -w "%{http_code}" "https://api.github.com/repos/$REPO/releases/tags/$cand") == "200" ]]; then
+            echo "$cand"
+            return
+        fi
+    done
+    echo "找不到版本 $arg 对应的 Release（试过 $PKG_PREFIX/v$bare 和 v$bare）" >&2
     exit 1
+}
+
+# 自动选最新版本：优先 qr_service/vX.Y.Z 按包 tag（版本号最大者），回退统一 tag vX.Y.Z
+resolve_latest_tag() {
+    local tags tag
+    tags=$(list_tags)
+    tag=$(printf '%s\n' "$tags" | grep -P "^$PKG_PREFIX/v?\d+\.\d+\.\d+" | sort -V | tail -1)
+    [[ -z "$tag" ]] && tag=$(printf '%s\n' "$tags" | grep -P "^v?\d+\.\d+\.\d+" | sort -V | tail -1)
+    if [[ -z "$tag" ]]; then
+        echo "未找到任何 Release（api.github.com 不可达？），可显式指定: sudo ./install-qr-service.sh 0.3.0" >&2
+        exit 1
+    fi
+    echo "$tag"
+}
+
+if [[ -n "${1:-}" ]]; then
+    TAG=$(resolve_user_tag "$1")
+else
+    echo "==> 查询最新 Release..."
+    TAG=$(resolve_latest_tag)
 fi
-echo "==> 安装 qr_service v$VERSION 到 $INSTALL_DIR"
+echo "==> 安装 qr_service（Release: $TAG）到 $INSTALL_DIR"
 
 mkdir -p "$INSTALL_DIR"
 
 # 1. dist 构建的二进制。先下载后停服务：下载可能很慢甚至失败，
 # 期间旧版本继续提供服务，停服窗口只剩本地替换的几秒
 echo "==> 下载二进制（GitHub Release）..."
-dl "${GH_PROXY}https://github.com/$REPO/releases/download/v${VERSION}/qr_service-x86_64-unknown-linux-gnu.tar.xz" -o /tmp/qr_service.tar.xz
+dl "${GH_PROXY}https://github.com/$REPO/releases/download/$TAG/$ASSET" -o /tmp/qr_service.tar.xz
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 tar -xJf /tmp/qr_service.tar.xz -C "$INSTALL_DIR"
 rm /tmp/qr_service.tar.xz
@@ -53,7 +85,7 @@ chmod +x "$INSTALL_DIR/qr_service"
 
 # 2. 运行时资源（dist 产物只含二进制；static/templates 从同版本源码包取）
 echo "==> 下载运行时资源（static/templates）..."
-dl "${GH_PROXY}https://codeload.github.com/$REPO/tar.gz/refs/tags/v${VERSION}" -o /tmp/qr_server-src.tar.gz
+dl "${GH_PROXY}https://codeload.github.com/$REPO/tar.gz/refs/tags/$TAG" -o /tmp/qr_server-src.tar.gz
 rm -rf /tmp/qr_server-src
 mkdir -p /tmp/qr_server-src
 tar -xzf /tmp/qr_server-src.tar.gz -C /tmp/qr_server-src --strip-components=1
@@ -101,6 +133,7 @@ elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 
     firewall-cmd --permanent --add-port=9095/tcp >/dev/null && firewall-cmd --reload >/dev/null
     echo "==> firewalld 已放行 9095/tcp"
 fi
+
 sleep 2
 if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo "安装完成，服务运行中。设计器入口: http://<服务器IP>:9095/designer"
