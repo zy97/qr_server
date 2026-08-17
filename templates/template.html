@@ -7,7 +7,7 @@ html, body { margin: 0; padding: 0; }
 body { font-family: "Microsoft YaHei UI", sans-serif; font-weight: bold; }
 #app *:focus { outline: none !important; }
 .hiprint-printPaper { overflow: visible !important; }
-#app { position: relative; width: 150mm; height: 64.8mm; overflow: hidden; padding: 1pt; }
+#app { position: relative; width: 150mm; height: 64.6mm; overflow: hidden; padding: 3pt; }
 </style>
 <style>
 
@@ -830,10 +830,409 @@ table.hiprint-printElement-tableTarget {
   text-align: left;
   clear: both;
 }
+
+
+@property --rf-tw-animation-delay{syntax:"*";inherits:false;initial-value:0s}
+
+@property --rf-tw-animation-direction{syntax:"*";inherits:false;initial-value:normal}
+
+@property --rf-tw-animation-duration{syntax:"*";inherits:false}
+
+@property --rf-tw-animation-fill-mode{syntax:"*";inherits:false;initial-value:none}
+
+@property --rf-tw-animation-iteration-count{syntax:"*";inherits:false;initial-value:1}
+
+@property --rf-tw-enter-blur{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-enter-opacity{syntax:"*";inherits:false;initial-value:1}
+
+@property --rf-tw-enter-rotate{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-enter-scale{syntax:"*";inherits:false;initial-value:1}
+
+@property --rf-tw-enter-translate-x{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-enter-translate-y{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-exit-blur{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-exit-opacity{syntax:"*";inherits:false;initial-value:1}
+
+@property --rf-tw-exit-rotate{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-exit-scale{syntax:"*";inherits:false;initial-value:1}
+
+@property --rf-tw-exit-translate-x{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-exit-translate-y{syntax:"*";inherits:false;initial-value:0}
+
+@property --scroll-fade-t{syntax:"<length-percentage>";inherits:false;initial-value:0}
+
+@property --scroll-fade-b{syntax:"<length-percentage>";inherits:false;initial-value:0}
+
+@property --scroll-fade-s{syntax:"<length-percentage>";inherits:false;initial-value:0}
+
+@property --scroll-fade-e{syntax:"<length-percentage>";inherits:false;initial-value:0}
+
+@property --scroll-fade-mask{syntax:"*";inherits:false}
+
+@property --shimmer-angle{syntax:"<angle>";inherits:true;initial-value:20deg}
+
+@property --shimmer-image{syntax:"*";inherits:false}
+
+@property --shimmer-text-fill{syntax:"*";inherits:false}
+
+@property --rf-tw-border-spacing-x{syntax:"<length>";inherits:false;initial-value:0}
+
+@property --rf-tw-border-spacing-y{syntax:"<length>";inherits:false;initial-value:0}
+
+@property --rf-tw-translate-x{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-translate-y{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-translate-z{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-scale-x{syntax:"*";inherits:false;initial-value:1}
+
+@property --rf-tw-scale-y{syntax:"*";inherits:false;initial-value:1}
+
+@property --rf-tw-scale-z{syntax:"*";inherits:false;initial-value:1}
+
+@property --rf-tw-rotate-x{syntax:"*";inherits:false}
+
+@property --rf-tw-rotate-y{syntax:"*";inherits:false}
+
+@property --rf-tw-rotate-z{syntax:"*";inherits:false}
+
+@property --rf-tw-skew-x{syntax:"*";inherits:false}
+
+@property --rf-tw-skew-y{syntax:"*";inherits:false}
+
+@property --rf-tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-divide-y-reverse{syntax:"*";inherits:false;initial-value:0}
+
+@property --rf-tw-border-style{syntax:"*";inherits:false;initial-value:solid}
+
+@property --rf-tw-gradient-position{syntax:"*";inherits:false}
+
+@property --rf-tw-gradient-from{syntax:"<color>";inherits:false;initial-value:#0000}
+
+@property --rf-tw-gradient-via{syntax:"<color>";inherits:false;initial-value:#0000}
+
+@property --rf-tw-gradient-to{syntax:"<color>";inherits:false;initial-value:#0000}
+
+@property --rf-tw-gradient-stops{syntax:"*";inherits:false}
+
+@property --rf-tw-gradient-via-stops{syntax:"*";inherits:false}
+
+@property --rf-tw-gradient-from-position{syntax:"<length-percentage>";inherits:false;initial-value:0%}
+
+@property --rf-tw-gradient-via-position{syntax:"<length-percentage>";inherits:false;initial-value:50%}
+
+@property --rf-tw-gradient-to-position{syntax:"<length-percentage>";inherits:false;initial-value:100%}
+
+@property --rf-tw-leading{syntax:"*";inherits:false}
+
+@property --rf-tw-font-weight{syntax:"*";inherits:false}
+
+@property --rf-tw-tracking{syntax:"*";inherits:false}
+
+@property --rf-tw-ordinal{syntax:"*";inherits:false}
+
+@property --rf-tw-slashed-zero{syntax:"*";inherits:false}
+
+@property --rf-tw-numeric-figure{syntax:"*";inherits:false}
+
+@property --rf-tw-numeric-spacing{syntax:"*";inherits:false}
+
+@property --rf-tw-numeric-fraction{syntax:"*";inherits:false}
+
+@property --rf-tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+
+@property --rf-tw-shadow-color{syntax:"*";inherits:false}
+
+@property --rf-tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}
+
+@property --rf-tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+
+@property --rf-tw-inset-shadow-color{syntax:"*";inherits:false}
+
+@property --rf-tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}
+
+@property --rf-tw-ring-color{syntax:"*";inherits:false}
+
+@property --rf-tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+
+@property --rf-tw-inset-ring-color{syntax:"*";inherits:false}
+
+@property --rf-tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+
+@property --rf-tw-ring-inset{syntax:"*";inherits:false}
+
+@property --rf-tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}
+
+@property --rf-tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}
+
+@property --rf-tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+
+@property --rf-tw-outline-style{syntax:"*";inherits:false;initial-value:solid}
+
+@property --rf-tw-blur{syntax:"*";inherits:false}
+
+@property --rf-tw-brightness{syntax:"*";inherits:false}
+
+@property --rf-tw-contrast{syntax:"*";inherits:false}
+
+@property --rf-tw-grayscale{syntax:"*";inherits:false}
+
+@property --rf-tw-hue-rotate{syntax:"*";inherits:false}
+
+@property --rf-tw-invert{syntax:"*";inherits:false}
+
+@property --rf-tw-opacity{syntax:"*";inherits:false}
+
+@property --rf-tw-saturate{syntax:"*";inherits:false}
+
+@property --rf-tw-sepia{syntax:"*";inherits:false}
+
+@property --rf-tw-drop-shadow{syntax:"*";inherits:false}
+
+@property --rf-tw-drop-shadow-color{syntax:"*";inherits:false}
+
+@property --rf-tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}
+
+@property --rf-tw-drop-shadow-size{syntax:"*";inherits:false}
+
+@property --rf-tw-backdrop-blur{syntax:"*";inherits:false}
+
+@property --rf-tw-backdrop-brightness{syntax:"*";inherits:false}
+
+@property --rf-tw-backdrop-contrast{syntax:"*";inherits:false}
+
+@property --rf-tw-backdrop-grayscale{syntax:"*";inherits:false}
+
+@property --rf-tw-backdrop-hue-rotate{syntax:"*";inherits:false}
+
+@property --rf-tw-backdrop-invert{syntax:"*";inherits:false}
+
+@property --rf-tw-backdrop-opacity{syntax:"*";inherits:false}
+
+@property --rf-tw-backdrop-saturate{syntax:"*";inherits:false}
+
+@property --rf-tw-backdrop-sepia{syntax:"*";inherits:false}
+
+@property --rf-tw-duration{syntax:"*";inherits:false}
+
+@property --rf-tw-ease{syntax:"*";inherits:false}
+
+@property --rf-tw-content{syntax:"*";inherits:false;initial-value:""}
+
+@property --rf-tw-animation-delay{syntax:"*";inherits:false;initial-value:0s}
+@property --rf-tw-animation-direction{syntax:"*";inherits:false;initial-value:normal}
+@property --rf-tw-animation-duration{syntax:"*";inherits:false}
+@property --rf-tw-animation-fill-mode{syntax:"*";inherits:false;initial-value:none}
+@property --rf-tw-animation-iteration-count{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-enter-blur{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-enter-opacity{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-enter-rotate{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-enter-scale{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-enter-translate-x{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-enter-translate-y{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-exit-blur{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-exit-opacity{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-exit-rotate{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-exit-scale{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-exit-translate-x{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-exit-translate-y{syntax:"*";inherits:false;initial-value:0}
+@property --scroll-fade-t{syntax:"<length-percentage>";inherits:false;initial-value:0}
+@property --scroll-fade-b{syntax:"<length-percentage>";inherits:false;initial-value:0}
+@property --scroll-fade-s{syntax:"<length-percentage>";inherits:false;initial-value:0}
+@property --scroll-fade-e{syntax:"<length-percentage>";inherits:false;initial-value:0}
+@property --scroll-fade-mask{syntax:"*";inherits:false}
+@property --shimmer-angle{syntax:"<angle>";inherits:true;initial-value:20deg}
+@property --shimmer-image{syntax:"*";inherits:false}
+@property --shimmer-text-fill{syntax:"*";inherits:false}
+@property --rf-tw-border-spacing-x{syntax:"<length>";inherits:false;initial-value:0}
+@property --rf-tw-border-spacing-y{syntax:"<length>";inherits:false;initial-value:0}
+@property --rf-tw-translate-x{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-translate-y{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-translate-z{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-scale-x{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-scale-y{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-scale-z{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-rotate-x{syntax:"*";inherits:false}
+@property --rf-tw-rotate-y{syntax:"*";inherits:false}
+@property --rf-tw-rotate-z{syntax:"*";inherits:false}
+@property --rf-tw-skew-x{syntax:"*";inherits:false}
+@property --rf-tw-skew-y{syntax:"*";inherits:false}
+@property --rf-tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-divide-y-reverse{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-border-style{syntax:"*";inherits:false;initial-value:solid}
+@property --rf-tw-gradient-position{syntax:"*";inherits:false}
+@property --rf-tw-gradient-from{syntax:"<color>";inherits:false;initial-value:#0000}
+@property --rf-tw-gradient-via{syntax:"<color>";inherits:false;initial-value:#0000}
+@property --rf-tw-gradient-to{syntax:"<color>";inherits:false;initial-value:#0000}
+@property --rf-tw-gradient-stops{syntax:"*";inherits:false}
+@property --rf-tw-gradient-via-stops{syntax:"*";inherits:false}
+@property --rf-tw-gradient-from-position{syntax:"<length-percentage>";inherits:false;initial-value:0%}
+@property --rf-tw-gradient-via-position{syntax:"<length-percentage>";inherits:false;initial-value:50%}
+@property --rf-tw-gradient-to-position{syntax:"<length-percentage>";inherits:false;initial-value:100%}
+@property --rf-tw-leading{syntax:"*";inherits:false}
+@property --rf-tw-font-weight{syntax:"*";inherits:false}
+@property --rf-tw-tracking{syntax:"*";inherits:false}
+@property --rf-tw-ordinal{syntax:"*";inherits:false}
+@property --rf-tw-slashed-zero{syntax:"*";inherits:false}
+@property --rf-tw-numeric-figure{syntax:"*";inherits:false}
+@property --rf-tw-numeric-spacing{syntax:"*";inherits:false}
+@property --rf-tw-numeric-fraction{syntax:"*";inherits:false}
+@property --rf-tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-shadow-color{syntax:"*";inherits:false}
+@property --rf-tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}
+@property --rf-tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-inset-shadow-color{syntax:"*";inherits:false}
+@property --rf-tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}
+@property --rf-tw-ring-color{syntax:"*";inherits:false}
+@property --rf-tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-inset-ring-color{syntax:"*";inherits:false}
+@property --rf-tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-ring-inset{syntax:"*";inherits:false}
+@property --rf-tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}
+@property --rf-tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}
+@property --rf-tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-outline-style{syntax:"*";inherits:false;initial-value:solid}
+@property --rf-tw-blur{syntax:"*";inherits:false}
+@property --rf-tw-brightness{syntax:"*";inherits:false}
+@property --rf-tw-contrast{syntax:"*";inherits:false}
+@property --rf-tw-grayscale{syntax:"*";inherits:false}
+@property --rf-tw-hue-rotate{syntax:"*";inherits:false}
+@property --rf-tw-invert{syntax:"*";inherits:false}
+@property --rf-tw-opacity{syntax:"*";inherits:false}
+@property --rf-tw-saturate{syntax:"*";inherits:false}
+@property --rf-tw-sepia{syntax:"*";inherits:false}
+@property --rf-tw-drop-shadow{syntax:"*";inherits:false}
+@property --rf-tw-drop-shadow-color{syntax:"*";inherits:false}
+@property --rf-tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}
+@property --rf-tw-drop-shadow-size{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-blur{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-brightness{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-contrast{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-grayscale{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-hue-rotate{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-invert{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-opacity{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-saturate{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-sepia{syntax:"*";inherits:false}
+@property --rf-tw-duration{syntax:"*";inherits:false}
+@property --rf-tw-ease{syntax:"*";inherits:false}
+@property --rf-tw-content{syntax:"*";inherits:false;initial-value:""}
+
+@property --rf-tw-animation-delay{syntax:"*";inherits:false;initial-value:0s}
+@property --rf-tw-animation-direction{syntax:"*";inherits:false;initial-value:normal}
+@property --rf-tw-animation-duration{syntax:"*";inherits:false}
+@property --rf-tw-animation-fill-mode{syntax:"*";inherits:false;initial-value:none}
+@property --rf-tw-animation-iteration-count{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-enter-blur{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-enter-opacity{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-enter-rotate{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-enter-scale{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-enter-translate-x{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-enter-translate-y{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-exit-blur{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-exit-opacity{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-exit-rotate{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-exit-scale{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-exit-translate-x{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-exit-translate-y{syntax:"*";inherits:false;initial-value:0}
+@property --scroll-fade-t{syntax:"<length-percentage>";inherits:false;initial-value:0}
+@property --scroll-fade-b{syntax:"<length-percentage>";inherits:false;initial-value:0}
+@property --scroll-fade-s{syntax:"<length-percentage>";inherits:false;initial-value:0}
+@property --scroll-fade-e{syntax:"<length-percentage>";inherits:false;initial-value:0}
+@property --scroll-fade-mask{syntax:"*";inherits:false}
+@property --shimmer-angle{syntax:"<angle>";inherits:true;initial-value:20deg}
+@property --shimmer-image{syntax:"*";inherits:false}
+@property --shimmer-text-fill{syntax:"*";inherits:false}
+@property --rf-tw-border-spacing-x{syntax:"<length>";inherits:false;initial-value:0}
+@property --rf-tw-border-spacing-y{syntax:"<length>";inherits:false;initial-value:0}
+@property --rf-tw-translate-x{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-translate-y{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-translate-z{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-scale-x{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-scale-y{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-scale-z{syntax:"*";inherits:false;initial-value:1}
+@property --rf-tw-rotate-x{syntax:"*";inherits:false}
+@property --rf-tw-rotate-y{syntax:"*";inherits:false}
+@property --rf-tw-rotate-z{syntax:"*";inherits:false}
+@property --rf-tw-skew-x{syntax:"*";inherits:false}
+@property --rf-tw-skew-y{syntax:"*";inherits:false}
+@property --rf-tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-divide-y-reverse{syntax:"*";inherits:false;initial-value:0}
+@property --rf-tw-border-style{syntax:"*";inherits:false;initial-value:solid}
+@property --rf-tw-gradient-position{syntax:"*";inherits:false}
+@property --rf-tw-gradient-from{syntax:"<color>";inherits:false;initial-value:#0000}
+@property --rf-tw-gradient-via{syntax:"<color>";inherits:false;initial-value:#0000}
+@property --rf-tw-gradient-to{syntax:"<color>";inherits:false;initial-value:#0000}
+@property --rf-tw-gradient-stops{syntax:"*";inherits:false}
+@property --rf-tw-gradient-via-stops{syntax:"*";inherits:false}
+@property --rf-tw-gradient-from-position{syntax:"<length-percentage>";inherits:false;initial-value:0%}
+@property --rf-tw-gradient-via-position{syntax:"<length-percentage>";inherits:false;initial-value:50%}
+@property --rf-tw-gradient-to-position{syntax:"<length-percentage>";inherits:false;initial-value:100%}
+@property --rf-tw-leading{syntax:"*";inherits:false}
+@property --rf-tw-font-weight{syntax:"*";inherits:false}
+@property --rf-tw-tracking{syntax:"*";inherits:false}
+@property --rf-tw-ordinal{syntax:"*";inherits:false}
+@property --rf-tw-slashed-zero{syntax:"*";inherits:false}
+@property --rf-tw-numeric-figure{syntax:"*";inherits:false}
+@property --rf-tw-numeric-spacing{syntax:"*";inherits:false}
+@property --rf-tw-numeric-fraction{syntax:"*";inherits:false}
+@property --rf-tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-shadow-color{syntax:"*";inherits:false}
+@property --rf-tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}
+@property --rf-tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-inset-shadow-color{syntax:"*";inherits:false}
+@property --rf-tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}
+@property --rf-tw-ring-color{syntax:"*";inherits:false}
+@property --rf-tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-inset-ring-color{syntax:"*";inherits:false}
+@property --rf-tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-ring-inset{syntax:"*";inherits:false}
+@property --rf-tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}
+@property --rf-tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}
+@property --rf-tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}
+@property --rf-tw-outline-style{syntax:"*";inherits:false;initial-value:solid}
+@property --rf-tw-blur{syntax:"*";inherits:false}
+@property --rf-tw-brightness{syntax:"*";inherits:false}
+@property --rf-tw-contrast{syntax:"*";inherits:false}
+@property --rf-tw-grayscale{syntax:"*";inherits:false}
+@property --rf-tw-hue-rotate{syntax:"*";inherits:false}
+@property --rf-tw-invert{syntax:"*";inherits:false}
+@property --rf-tw-opacity{syntax:"*";inherits:false}
+@property --rf-tw-saturate{syntax:"*";inherits:false}
+@property --rf-tw-sepia{syntax:"*";inherits:false}
+@property --rf-tw-drop-shadow{syntax:"*";inherits:false}
+@property --rf-tw-drop-shadow-color{syntax:"*";inherits:false}
+@property --rf-tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}
+@property --rf-tw-drop-shadow-size{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-blur{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-brightness{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-contrast{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-grayscale{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-hue-rotate{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-invert{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-opacity{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-saturate{syntax:"*";inherits:false}
+@property --rf-tw-backdrop-sepia{syntax:"*";inherits:false}
+@property --rf-tw-duration{syntax:"*";inherits:false}
+@property --rf-tw-ease{syntax:"*";inherits:false}
+@property --rf-tw-content{syntax:"*";inherits:false;initial-value:""}
 </style>
 </head>
 <body>
 <div id="app"><div class="hiprint-printTemplate"><div class="hiprint-printPanel panel-index-0"> 
-<div class="hiprint-printPaper" original-height="64.8" style="width: 150mm; height: 63.8mm;"><div class="hiprint-printPaper-content"><div class="hiprint-printElement hiprint-printElement-rect" style="border-image: none; position: absolute; width: 425.25pt; height: 27.75pt; left: 0pt; top: 0pt;"></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 72pt; height: 26.25pt; font-family: inherit; font-size: 17pt; font-weight: 700; text-align: center; line-height: 26pt; z-index: 1; left: 194.25pt; top: 1.5pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">测试公司</div></div><div class="hiprint-printElement hiprint-printElement-image" style="position: absolute; width: 24pt; height: 24.75pt; z-index: 1; left: 162.75pt; top: 3pt;"><div class="hiprint-printElement-image-content" style="height:100%;width:100%"><img style="width: 100%; height: 100%; content: url(&quot;data:image/png;base64,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&quot;) !important; object-fit: contain;" src="data:image/png;base64,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"></div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 59.25pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 265.5pt; top: 27.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">物料编码</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 190.5pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 75pt; top: 27.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ part_no }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 100.5pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-right: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-bottom: 1px solid rgb(0, 0, 0); border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 324.75pt; top: 27.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ _x_qr_string_7c_0 }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 75pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-left: 0.75pt solid rgb(0, 0, 0); border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-top-color: rgb(0, 0, 0); left: 0pt; top: 27.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">零件号</div></div><div class="hiprint-printElement hiprint-printElement-rect" style="border-image: none; position: absolute; width: 100.5pt; height: 103.5pt; left: 324.75pt; top: 54pt; border-top-style: none; border-top-width: 0px; border-left-style: none; border-left-width: 0px;"></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 249.75pt; height: 25.5pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-right: 1px solid rgb(0, 0, 0); border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 75pt; top: 54pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ material_name }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 100.5pt; height: 25.5pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; left: 324.75pt; top: 54pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ _x_qr_string_7c_6 }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 75pt; height: 25.5pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-left: 0.75pt solid rgb(0, 0, 0); border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-top-color: rgb(0, 0, 0); left: 0pt; top: 54pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">物料名称</div></div><div class="hiprint-printElement hiprint-printElement-text" style="position: absolute; width: 100.5pt; height: 69pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; left: 324.75pt; top: 72pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ _qr_qr_string | safe }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 50.25pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 215.25pt; top: 79.5pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">数量</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 140.25pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 75pt; top: 79.5pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ _x_qr_string_7c_2 }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 59.25pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-right: 1px solid rgb(0, 0, 0); border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 265.5pt; top: 79.5pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ _x_qr_string_7c_3 }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 75pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-left: 0.75pt solid rgb(0, 0, 0); border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-top-color: rgb(0, 0, 0); left: 0pt; top: 79.5pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">生成订单号</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 140.25pt; height: 25.5pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 75pt; top: 105.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ _x_qr_string_7c_1 }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 50.25pt; height: 25.5pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 215.25pt; top: 105.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">检验员</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 59.25pt; height: 25.5pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-right: 1px solid rgb(0, 0, 0); border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 265.5pt; top: 105.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%"></div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 75pt; height: 25.5pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-left: 0.75pt solid rgb(0, 0, 0); border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-top-color: rgb(0, 0, 0); left: 0pt; top: 105.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">批次号</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 249.75pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-right: 1px solid rgb(0, 0, 0); border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 75pt; top: 131.25pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ _x_qr_string_7c_5 }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 75pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-left: 0.75pt solid rgb(0, 0, 0); border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-top-color: rgb(0, 0, 0); left: 0pt; top: 131.25pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">生产日期</div></div><div class="hiprint-printElement hiprint-printElement-text" style="position: absolute; width: 120pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; left: 315pt; top: 141pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ "回" if is_return == true else "" }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 350.25pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-left-width: 0.75pt; border-top-color: rgb(0, 0, 0); border-left-color: rgb(0, 0, 0); left: 75pt; top: 157.5pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ customer_name }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 75pt; height: 26.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-left: 0.75pt solid rgb(0, 0, 0); border-right: 0.75pt solid rgb(0, 0, 0); border-bottom: 0.75pt solid rgb(0, 0, 0); border-top-width: 0.75pt; border-top-color: rgb(0, 0, 0); left: 0pt; top: 157.5pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">客户名称</div></div><span class="hiprint-paperNumber" style="position: absolute; top: 176pt; left: 395pt; display: none;">1-1</span></div></div></div></div></div>
+<div class="hiprint-printPaper" original-height="64.6" style="width: 150mm; height: 63.6mm;"><div class="hiprint-printPaper-content"><div class="hiprint-printElement hiprint-printElement-rect" style="border-image: none; position: absolute; width: 412.5pt; height: 39.75pt; left: 1.5pt; top: 0pt;"></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 80.25pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; z-index: 1; left: 165pt; top: 7.5pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">测试公司</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 66pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 900; text-align: center; z-index: 1; border-style: none solid solid none; border-width: 0px 0.75pt 0.75pt 0px; left: 249pt; top: 39.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">物料编码</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 167.25pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-style: none solid solid none; border-width: 0px 0.75pt 0.75pt 0px; left: 81.75pt; top: 39.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ part_no }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 99pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-style: none solid solid none; border-width: 0px 0.75pt 0.75pt 0px; left: 315pt; top: 39.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ _x_qr_string_7c_0 }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 80.25pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 900; text-align: center; z-index: 1; border-style: none solid solid; border-width: 0px 0.75pt 0.75pt; left: 1.5pt; top: 39.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">零件号</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 332.25pt; height: 23.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-style: none solid solid none; border-width: 0px 0.75pt 0.75pt 0px; left: 81.75pt; top: 63.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ material_name }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 80.25pt; height: 23.25pt; font-family: inherit; font-size: 10.5pt; font-weight: 900; text-align: center; z-index: 1; border-style: none solid solid; border-width: 0px 0.75pt 0.75pt; left: 1.5pt; top: 63.75pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">物料名称</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 120.75pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 700; text-align: center; z-index: 1; border-style: none solid solid none; border-width: 0px 0.75pt 0.75pt 0px; border-color: rgb(0, 0, 0); left: 81.75pt; top: 87pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">{{ _x_qr_string_7c_2 }}</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 80.25pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 900; text-align: center; z-index: 1; border-style: none solid solid; border-width: 0px 0.75pt 0.75pt; left: 1.5pt; top: 87pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">生成订单号</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 80.25pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 900; text-align: center; z-index: 1; border-style: none solid solid; border-width: 0px 0.75pt 0.75pt; left: 1.5pt; top: 111pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">批次号</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 80.25pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 900; text-align: center; z-index: 1; border-style: none solid solid; border-width: 0px 0.75pt 0.75pt; left: 1.5pt; top: 135pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">生产日期</div></div><div class="hiprint-printElement hiprint-printElement-text hiprint-text-content-middle" style="position: absolute; width: 80.25pt; height: 24pt; font-family: inherit; font-size: 10.5pt; font-weight: 900; text-align: center; z-index: 1; border-style: none solid solid; border-width: 0px 0.75pt 0.75pt; left: 1.5pt; top: 159pt;"><div class="hiprint-printElement-text-content hiprint-printElement-content" style="height:100%;width:100%">生产日期</div></div><span class="hiprint-paperNumber" style="position: absolute; top: 161pt; left: 395pt; display: none;">1-1</span></div></div></div></div></div>
 </body>
 </html>
