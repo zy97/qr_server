@@ -60,6 +60,7 @@
   <label style="font-size:13px">面板宽 <input id="panel-w" type="number" step="0.1" min="10" style="width:60px"> mm</label>
   <label style="font-size:13px">高 <input id="panel-h" type="number" step="0.1" min="10" style="width:60px"> mm</label>
   <button id="btn-panel">应用面板尺寸</button>
+  <button id="btn-fit-content" title="把所有元素平移到左上角原点，面板缩到内容包围盒大小；四周留白由「边距」设置统一提供">适配内容</button>
   <label style="font-size:13px" title="内容与最外层容器之间的间隙（影响渲染图片的外框留白）">边距 <input id="app-padding" type="number" step="0.5" min="0" style="width:50px" value="3"> pt</label>
   <label style="font-size:13px;display:flex;align-items:center;gap:4px" title="编辑文字或保存时，自动把 logo 和公司标题作为一组居中"><input type="checkbox" id="auto-center-header" checked> 表头自动居中</label>
   <label style="font-size:13px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="toggle-ruler" checked> 显示刻度</label>
@@ -872,6 +873,34 @@ $('#btn-panel').on('click', () => {
   // hiprint 面板 resize：paperType 传 null 表示自定义尺寸（单位 mm）
   hiprintTemplate.getPanel(0).resize(null, w, h);
   setStatus('面板已调整为 ' + w + 'mm × ' + h + 'mm，保存后生效');
+});
+
+// 面板适配内容：元素包围盒平移到原点 + 面板缩到包围盒尺寸。
+// 解决「面板建大了、内容只占一部分」导致边距设置被空白稀释的问题；
+// 显式操作、画布即时可见，不满意不保存即可还原
+$('#btn-fit-content').on('click', () => {
+  const panel = hiprintTemplate.getPanel(0);
+  const els = (panel.printElements || []).filter(e => e.options
+    && typeof e.options.left === 'number' && typeof e.options.top === 'number');
+  if (!els.length) { setStatus('画布上没有元素', true); return; }
+  // 先吸附共享边，包围盒基于对齐后的位置计算
+  alignElementEdges();
+  let minLeft = Infinity, minTop = Infinity, maxRight = 0, maxBottom = 0;
+  els.forEach(e => {
+    minLeft = Math.min(minLeft, e.options.left);
+    minTop = Math.min(minTop, e.options.top);
+    maxRight = Math.max(maxRight, e.options.left + (e.options.width || 0));
+    maxBottom = Math.max(maxBottom, e.options.top + (e.options.height || 0));
+  });
+  // 统一平移保持相对位置（元素边已对齐 0.75pt 网格，平移后仍在网格上）
+  els.forEach(e => { e.options.left -= minLeft; e.options.top -= minTop; });
+  const w = Math.round((maxRight - minLeft) / 72 * 25.4 * 10) / 10;
+  const h = Math.round((maxBottom - minTop) / 72 * 25.4 * 10) / 10;
+  panel.resize(null, w, h);
+  els.forEach(e => { if (e.updateDesignViewFromOptions) e.updateDesignViewFromOptions(); });
+  normalizeSharedBorders(document.querySelector('#design-canvas'));
+  syncPanelSizeInputs();
+  setStatus('面板已适配内容 ' + w + 'mm × ' + h + 'mm，保存后生效');
 });
 $('#btn-preview').on('click', () => {
   // 始终以当前模板实际使用的字段为基础生成；缓存仅回填同名字段的值，
