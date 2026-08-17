@@ -1,4 +1,4 @@
-﻿# print-agent 一键安装（标签打印代理，Windows）
+# print-agent 一键安装（标签打印代理，Windows）
 # 用法（管理员 PowerShell）：
 #   irm https://raw.githubusercontent.com/zy97/qr_server/main/scripts/install-print-agent.ps1 | iex
 # 或下载后带参数运行：

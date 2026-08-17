@@ -1,31 +1,46 @@
 #!/usr/bin/env bash
 # qr_service 一键安装（标签模板设计与渲染服务，Linux 服务器）
 # 用法：
-#   curl -fsSL https://raw.githubusercontent.com/zy97/qr_server/main/scripts/install-qr-service.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/zy97/qr_server/master/scripts/install-qr-service.sh | sudo bash
 #   或: sudo ./install-qr-service.sh 0.1.0
 # 重复执行即升级：会先停服务、替换二进制、再启动；已有 config.toml / templates/templates.db 不会被覆盖
+#
+# 国内服务器访问 GitHub Release 容易超时，可用 GH_PROXY 代理前缀（末尾带 /）：
+#   GH_PROXY="https://ghfast.top/" curl -fsSL .../install-qr-service.sh | sudo -E bash
 set -euo pipefail
 
 VERSION="${1:-}"                       # 如 0.1.0；留空取 GitHub 最新 Release
 REPO="zy97/qr_server"
 INSTALL_DIR="/opt/qr_service"
 SERVICE_NAME="qr_service"
+GH_PROXY="${GH_PROXY:-}"               # GitHub 下载代理前缀，如 https://ghfast.top/
 
 if [[ $EUID -ne 0 ]]; then
     echo "请用 root 运行（sudo）" >&2
     exit 1
 fi
 
+# 下载统一入口：连接 15s 超时 + 重试，进度条可见；卡死会快速失败而不是干等
+dl() {
+    curl -fL --connect-timeout 15 --retry 3 --retry-delay 2 "$@"
+}
+
 if [[ -z "$VERSION" ]]; then
-    VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep -oP '"tag_name":\s*"\Kv?[^"]+' | sed 's/^v//')
+    echo "==> 查询最新 Release 版本..."
+    VERSION=$(dl -s "https://api.github.com/repos/$REPO/releases/latest" | grep -oP '"tag_name":\s*"\Kv?[^"]+' | sed 's/^v//')
 fi
-echo "安装 qr_service v$VERSION 到 $INSTALL_DIR"
+if [[ -z "$VERSION" ]]; then
+    echo "获取版本号失败（api.github.com 不可达？），可显式指定版本: sudo ./install-qr-service.sh 0.1.0" >&2
+    exit 1
+fi
+echo "==> 安装 qr_service v$VERSION 到 $INSTALL_DIR"
 
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 mkdir -p "$INSTALL_DIR"
 
 # 1. dist 构建的二进制
-curl -fsSL "https://github.com/$REPO/releases/download/v${VERSION}/qr_service-x86_64-unknown-linux-gnu.tar.xz" -o /tmp/qr_service.tar.xz
+echo "==> 下载二进制（GitHub Release）..."
+dl "${GH_PROXY}https://github.com/$REPO/releases/download/v${VERSION}/qr_service-x86_64-unknown-linux-gnu.tar.xz" -o /tmp/qr_service.tar.xz
 tar -xJf /tmp/qr_service.tar.xz -C "$INSTALL_DIR"
 rm /tmp/qr_service.tar.xz
 # dist 压缩包可能带一层子目录，把二进制归位
@@ -36,7 +51,8 @@ fi
 chmod +x "$INSTALL_DIR/qr_service"
 
 # 2. 运行时资源（dist 产物只含二进制；static/templates 从同版本源码包取）
-curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/tags/v${VERSION}" -o /tmp/qr_server-src.tar.gz
+echo "==> 下载运行时资源（static/templates）..."
+dl "${GH_PROXY}https://codeload.github.com/$REPO/tar.gz/refs/tags/v${VERSION}" -o /tmp/qr_server-src.tar.gz
 rm -rf /tmp/qr_server-src
 mkdir -p /tmp/qr_server-src
 tar -xzf /tmp/qr_server-src.tar.gz -C /tmp/qr_server-src --strip-components=1
@@ -53,6 +69,7 @@ if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/
 fi
 
 # 4. systemd 开机自启服务
+echo "==> 注册 systemd 服务..."
 cat > /etc/systemd/system/qr_service.service <<EOF
 [Unit]
 Description=qr_service 标签模板设计与渲染服务

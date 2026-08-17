@@ -18,7 +18,8 @@
 irm https://raw.githubusercontent.com/zy97/qr_server/master/scripts/install-print-agent.ps1 | iex
 ```
 
-脚本会：下载最新 Release → 解压到 `C:\print-agent` → 首次写入 `print-agent.toml` → 注册开机自启的 Windows 服务（崩溃自动重启）→ 启动服务 → 防火墙放行端口 → 健康检查。
+脚本会：下载最新 Release → 解压到 `C:\print-agent` → 首次写入 `print-agent.toml` → 注册开机自启的 Windows 服务（崩溃自动重启）→ 启动服务 → 防火墙放行端口 → 健康检查。> 提示：脚本含中文提示信息，推荐直接用上面的 `irm | iex` 一行命令（Windows PowerShell 5.1 和 PowerShell 7 都可以）；
+> 如果下载 `install-print-agent.ps1` 到本地再运行，请用 PowerShell 7（pwsh）——5.1 直接运行 .ps1 文件会把中文按 ANSI 误读导致解析失败。
 
 可选参数（本地下载脚本后使用）：
 
@@ -48,6 +49,14 @@ curl -fsSL https://raw.githubusercontent.com/zy97/qr_server/master/scripts/insta
 脚本会：下载最新 Release 的 Linux 二进制到 `/opt/qr_service` → 从同版本源码包补 `static/`、`templates/` 种子文件和 `config.toml` → 注册 systemd 开机自启服务并启动 → 验证服务活性。
 
 指定版本：`sudo ./install-qr-service.sh 0.1.0`。重复执行即升级，已有 `config.toml` 和模板数据库 `templates/templates.db` 不会被覆盖。
+
+> 国内服务器访问 GitHub Release（objects.githubusercontent.com）容易超时卡死，可用 `GH_PROXY` 走代理前缀：
+>
+> ```bash
+> GH_PROXY="https://ghfast.top/" curl -fsSL https://raw.githubusercontent.com/zy97/qr_server/master/scripts/install-qr-service.sh | sudo -E bash
+> ```
+>
+> （代理服务地址可能变化，换成你可用的即可；注意 `sudo -E` 保留环境变量）
 
 注意：默认 `chrome` 渲染特性需要服务器安装 Chrome/Chromium（如 `apt install chromium-browser`），脚本检测到缺失会提示。
 
