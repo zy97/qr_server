@@ -47,6 +47,9 @@
   #preview-box { display: flex; gap: 16px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 6px; width: 1380px; height: 760px; box-sizing: border-box; overflow: hidden; }
   #preview-box .preview-result { flex: 1; min-width: 0; overflow: auto; }
   #preview-close { margin-top: 12px; }
+  /* 缩放手柄是元素的子元素且凸出 12px，密集网格下凸出部分被 DOM 靠后的相邻元素盖住（同 z-index）；
+     子元素无法跳出父元素层叠上下文，只能选中时抬高整个元素。仅设计态生效，不进模板 */
+  #design-canvas .hiprint-printElement:has(> .resize-panel.selected) { z-index: 100 !important; }
 </style>
 </head>
 <body>
@@ -506,18 +509,23 @@ function initDesigner(templateJson) {
       input.click();
     },
   });
-  // 8 方向缩放手柄：hiprint 默认只给 s/e/r 三个点；需在 design() 之前打到基类原型上
+  // 8 方向缩放手柄：hiprint 默认只给 s/e/r 三个点，图片类还自己覆盖了 4 点版本——
+  // 需按元素类型分别打到「拥有该方法的原型」上（text 命中基类原型，image 命中图片类自身原型），
+  // 且必须在 design() 之前 patch。横线/竖线/表格保留各自的方向限制，不动
   (() => {
-    const probe = hiprint.PrintElementTypeManager.getElementType('labelModule.text').createPrintElement({});
-    let proto = Object.getPrototypeOf(probe);
-    while (proto && !Object.prototype.hasOwnProperty.call(proto, 'getReizeableShowPoints')) {
-      proto = Object.getPrototypeOf(proto);
-    }
-    if (proto) {
-      proto.getReizeableShowPoints = function () {
-        return ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
-      };
-    }
+    const POINTS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
+    ['labelModule.text', 'labelModule.image'].forEach(tid => {
+      const probe = hiprint.PrintElementTypeManager.getElementType(tid).createPrintElement({});
+      let proto = Object.getPrototypeOf(probe);
+      while (proto && !Object.prototype.hasOwnProperty.call(proto, 'getReizeableShowPoints')) {
+        proto = Object.getPrototypeOf(proto);
+      }
+      if (proto) {
+        proto.getReizeableShowPoints = function () {
+          return POINTS;
+        };
+      }
+    });
   })();
   $('#design-canvas').empty();
   hiprintTemplate.design('#design-canvas');
