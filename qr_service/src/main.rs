@@ -2,7 +2,6 @@ mod child_cleanup;
 mod config;
 mod designer;
 pub mod err;
-#[cfg(any(feature = "typst", feature = "chrome"))]
 mod print;
 #[cfg(feature = "typst")]
 mod requests;

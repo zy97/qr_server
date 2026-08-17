@@ -47,6 +47,7 @@ tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = "0.3.23"
 base64 = "0.23.1" # 用于图像与打印数据之间的 Base64 转换
+reqwest = { version = "0.13", default-features = false } # 仅 HTTP：把标签 PNG POST 给内网打印代理
 [dev-dependencies]
 criterion = "0.8.2"
 

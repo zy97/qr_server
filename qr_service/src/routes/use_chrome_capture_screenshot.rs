@@ -124,7 +124,7 @@ async fn create_label(
 
         let image_data = capture_label_screenshot(&rendered).await?;
         if should_print(crate::config::CONFIG.print.enabled, &query) {
-            crate::print::print_label_png(&image_data)?;
+            crate::print::print_label_png(&image_data).await?;
         }
         result_image = Some(image_data);
     }

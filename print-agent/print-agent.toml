@@ -1,0 +1,13 @@
+# print-agent 配置：放在 exe 同目录（或启动目录）下，文件名 print-agent.toml
+
+[server]
+# HTTP 监听端口
+port = 9195
+
+[print]
+# 目标打印机名（Windows 打印机列表中的名称）；请求可用 ?printer= 覆盖
+printer_name = "ZDesigner ZT231-300dpi ZPL"
+
+# 自定义纸张尺寸（cm），与原 C# 打印服务一致
+paper_width = 10.57
+paper_height = 29.70

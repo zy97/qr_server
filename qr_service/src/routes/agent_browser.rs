@@ -35,10 +35,16 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
 }
 
-/// /label 查询参数：template 指定渲染模板（id 或名称），缺省用默认模板
+/// /label 查询参数：template 指定渲染模板（id 或名称），缺省用默认模板；print=false 跳过打印（模板设计器预览用）
 #[derive(serde::Deserialize)]
 pub struct LabelQuery {
     template: Option<String>,
+    print: Option<bool>,
+}
+
+/// 与 chrome 渲染路径一致的打印开关语义：配置开启且请求未显式 print=false 才打印
+fn should_print(config_enabled: bool, query: &LabelQuery) -> bool {
+    config_enabled && query.print != Some(false)
 }
 
 #[post("/label")]
@@ -107,6 +113,9 @@ async fn create_label(
             "agent-browser screenshot read"
         );
         info!("agent-browser rendered {}", output_path.path().display());
+        if should_print(crate::config::CONFIG.print.enabled, &query) {
+            crate::print::print_label_png(&image_data).await?;
+        }
         result_image = Some(image_data);
     }
 

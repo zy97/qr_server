@@ -31,44 +31,16 @@ impl Default for TemplateConfig {
     }
 }
 
-/// 以下默认值来自原 C# 打印服务的生产配置
-fn default_printer_name() -> String {
-    "ZDesigner ZT231-300dpi ZPL".to_string()
-}
-
-fn default_paper_width() -> f64 {
-    10.57
-}
-
-fn default_paper_height() -> f64 {
-    29.70
-}
-
-#[derive(Deserialize)]
+/// 集中部署后服务器（可为 Linux）只负责渲染，打印动作由 Windows 机器上的
+/// print-agent 完成；打印机名/纸张等设置都在 print-agent 侧
+#[derive(Deserialize, Default)]
 pub struct PrintConfig {
-    /// 生成标签图片后是否同时发送到打印机
+    /// 生成标签图片后是否同时发送到打印代理
     #[serde(default)]
     pub enabled: bool,
-    /// 目标打印机名（Windows 打印机列表中的名称）
-    #[serde(default = "default_printer_name")]
-    pub printer_name: String,
-    /// 自定义纸张宽度（cm）
-    #[serde(default = "default_paper_width")]
-    pub paper_width: f64,
-    /// 自定义纸张高度（cm）
-    #[serde(default = "default_paper_height")]
-    pub paper_height: f64,
-}
-
-impl Default for PrintConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            printer_name: default_printer_name(),
-            paper_width: default_paper_width(),
-            paper_height: default_paper_height(),
-        }
-    }
+    /// 打印代理地址，如 http://192.168.1.100:9195
+    #[serde(default)]
+    pub agent_url: String,
 }
 
 pub static CONFIG: LazyLock<Config> =
@@ -96,22 +68,17 @@ mod tests {
 
     #[test]
     fn parse_print_config() {
-        let config: Config = toml::from_str(
-            "[print]\nenabled = true\nprinter_name = \"Test Printer\"\npaper_width = 15.0\npaper_height = 10.0",
-        )
-        .unwrap();
+        let config: Config =
+            toml::from_str("[print]\nenabled = true\nagent_url = \"http://192.168.1.100:9195\"")
+                .unwrap();
         assert!(config.print.enabled);
-        assert_eq!(config.print.printer_name, "Test Printer");
-        assert_eq!(config.print.paper_width, 15.0);
-        assert_eq!(config.print.paper_height, 10.0);
+        assert_eq!(config.print.agent_url, "http://192.168.1.100:9195");
     }
 
     #[test]
-    fn missing_print_section_uses_csharp_defaults() {
+    fn missing_print_section_defaults_disabled() {
         let config: Config = toml::from_str("").unwrap();
         assert!(!config.print.enabled);
-        assert_eq!(config.print.printer_name, "ZDesigner ZT231-300dpi ZPL");
-        assert_eq!(config.print.paper_width, 10.57);
-        assert_eq!(config.print.paper_height, 29.70);
+        assert!(config.print.agent_url.is_empty());
     }
 }

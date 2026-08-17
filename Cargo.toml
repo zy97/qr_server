@@ -1,5 +1,5 @@
 [workspace]
-members = ["qr_service"]
+members = ["qr_service", "print-agent"]
 resolver = "2"
 
 # The profile that 'dist' will build with

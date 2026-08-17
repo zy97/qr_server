@@ -1,15 +1,10 @@
 # qr_service 配置
 
 [print]
-# 生成标签图片后是否同时发送到打印机
+# 生成标签图片后是否同时发送打印（POST 给 print-agent，由它送到 Windows 打印机）
 enabled = false
-# 目标打印机名（Windows 打印机列表中的名称）
-# printer_name = "ZDesigner ZT231-300dpi ZPL"
-printer_name = "Microsoft Print to PDF"
-
-# 自定义纸张尺寸（cm），与原 C# 打印服务一致
-paper_width = 10.57
-paper_height = 29.70
+# 打印代理地址（运行 print-agent 的 Windows 机器）
+agent_url = "http://127.0.0.1:9195"
 
 [template]
 # 保存模板时是否把渲染 HTML 落地到 templates/template.html（仅供本地查看，渲染以数据库为准）

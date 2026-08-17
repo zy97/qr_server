@@ -1,0 +1,20 @@
+[package]
+name = "print-agent"
+version = "0.1.0"
+edition = "2021"
+description = "标签打印代理：接收 PNG 并发送到本机 Windows 打印机"
+repository = "https://github.com/zy97/qr_server"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8.9", features = ["json", "tokio", "tracing"] }
+base64 = "0.23.1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["registry", "std"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
