@@ -1,0 +1,55 @@
+[package]
+edition = "2021"
+name = "qr_service"
+version = "0.1.0"
+description = "标签模板设计与打印服务"
+repository = "https://github.com/zy97/qr_server"
+
+[features]
+default = ["chrome"]
+
+typst = [
+    "dep:tokio",
+]
+chrome = [
+    "dep:anyhow",
+    "dep:barcoders",
+    "dep:chromiumoxide",
+    "dep:futures",
+    "dep:image",
+    "dep:qrcode",
+    "dep:tera",
+    "dep:tokio",
+]
+agent-browser = [
+    "dep:barcoders",
+    "dep:image",
+    "dep:qrcode",
+    "dep:tera",
+]
+[dependencies]
+serde_json = "1.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
+actix-web = "4"
+anyhow = { version = "1", optional = true }
+chromiumoxide = { version = "=0.9.1", optional = true }
+futures = { version = "0.3", optional = true }
+
+image = { version = "0.25", optional = true }
+qrcode = { version = "0.14.1", optional = true }
+barcoders = { version = "1", features = ["image"], optional = true }
+serde = { version = "1", features = ["derive"] }
+tera = { version = "2.1.0", default-features = false, optional = true }
+thiserror = "2"
+toml = "0.8"
+tokio = { version = "1", features = ["sync", "process", "fs", "io-util", "time", "rt"], optional = true }
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = "0.3.23"
+base64 = "0.23.1" # 用于图像与打印数据之间的 Base64 转换
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+harness = false
+name = "qr_benchmark"

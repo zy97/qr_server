@@ -5,3 +5,7 @@ templates/qr.png
 result.png
 logs/*
 templates/templates.db
+
+# 外部工具二进制，不入库
+/typst.exe
+/agent-browser.exe
