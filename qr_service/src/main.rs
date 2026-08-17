@@ -38,7 +38,7 @@ async fn main() -> std::io::Result<()> {
             .configure(routes::configure)
             .configure(designer::configure)
     })
-    .bind(("127.0.0.1", 9095))?
+    .bind((config::CONFIG.server.host.as_str(), config::CONFIG.server.port))?
     .run()
     .await
 }

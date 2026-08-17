@@ -87,6 +87,15 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now "$SERVICE_NAME"
+
+# 防火墙放行 9095（qr_service 默认监听 0.0.0.0:9095；按实际存在的防火墙工具处理）
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+    ufw allow 9095/tcp >/dev/null
+    echo "==> ufw 已放行 9095/tcp"
+elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port=9095/tcp >/dev/null && firewall-cmd --reload >/dev/null
+    echo "==> firewalld 已放行 9095/tcp"
+fi
 sleep 2
 if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo "安装完成，服务运行中。设计器入口: http://<服务器IP>:9095/designer"

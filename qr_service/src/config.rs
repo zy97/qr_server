@@ -7,9 +7,38 @@ use tracing::warn;
 #[derive(Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
+    pub server: ServerConfig,
+    #[serde(default)]
     pub print: PrintConfig,
     #[serde(default)]
     pub template: TemplateConfig,
+}
+
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_port() -> u16 {
+    9095
+}
+
+/// HTTP 监听地址。服务器部署需要被其他机器访问，默认 0.0.0.0；
+/// 仅本机使用可改为 127.0.0.1
+#[derive(Deserialize)]
+pub struct ServerConfig {
+    #[serde(default = "default_host")]
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: default_host(),
+            port: default_port(),
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -58,6 +87,16 @@ pub static CONFIG: LazyLock<Config> =
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn server_defaults_lan_reachable_and_parses() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.port, 9095);
+        let config: Config = toml::from_str("[server]\nhost = \"127.0.0.1\"\nport = 8080").unwrap();
+        assert_eq!(config.server.host, "127.0.0.1");
+        assert_eq!(config.server.port, 8080);
+    }
+
     #[test]
     fn template_save_html_defaults_true_and_parses() {
         let config: Config = toml::from_str("").unwrap();
