@@ -15,7 +15,7 @@
 管理员 PowerShell 执行：
 
 ```powershell
-irm https://raw.githubusercontent.com/zy97/qr_server/main/scripts/install-print-agent.ps1 | iex
+irm https://raw.githubusercontent.com/zy97/qr_server/master/scripts/install-print-agent.ps1 | iex
 ```
 
 脚本会：下载最新 Release → 解压到 `C:\print-agent` → 首次写入 `print-agent.toml` → 注册开机自启的 Windows 服务（崩溃自动重启）→ 启动服务 → 防火墙放行端口 → 健康检查。
@@ -42,7 +42,7 @@ irm https://raw.githubusercontent.com/zy97/qr_server/main/scripts/install-print-
 root 执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zy97/qr_server/main/scripts/install-qr-service.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/zy97/qr_server/master/scripts/install-qr-service.sh | sudo bash
 ```
 
 脚本会：下载最新 Release 的 Linux 二进制到 `/opt/qr_service` → 从同版本源码包补 `static/`、`templates/` 种子文件和 `config.toml` → 注册 systemd 开机自启服务并启动 → 验证服务活性。
