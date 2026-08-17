@@ -450,6 +450,27 @@ function centerHeaderGroup(live) {
   }
 }
 
+// 拖拽阈值：hidraggable 没有最小拖动距离，mousedown 后任何 mousemove 都会触发拖动，
+// 位置再被吸附到 1.5pt 网格并联动 alignElementEdges——单击选中时的鼠标抖动就会改变布局。
+// hidraggable 的拖动监听绑在 document 冒泡阶段；此处用捕获阶段拦截未超过阈值的
+// mousemove（stopPropagation 后冒泡监听收不到事件），按住左键移动超过阈值才放行、开始拖动
+(function () {
+  const DRAG_THRESHOLD_PX = 4;
+  let armed = false, startX = 0, startY = 0;
+  document.addEventListener('mousedown', e => {
+    armed = e.button === 0 && !!(e.target.closest && e.target.closest('#design-canvas .hiprint-printElement'));
+    if (armed) { startX = e.pageX; startY = e.pageY; }
+  }, true);
+  document.addEventListener('mousemove', e => {
+    if (armed
+      && Math.abs(e.pageX - startX) < DRAG_THRESHOLD_PX
+      && Math.abs(e.pageY - startY) < DRAG_THRESHOLD_PX) {
+      e.stopPropagation();
+    }
+  }, true);
+  document.addEventListener('mouseup', () => { armed = false; }, true);
+})();
+
 
 function initDesigner(templateJson) {
   hiprint.init({ providers: [new labelProvider()] });
