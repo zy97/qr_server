@@ -7,8 +7,7 @@ use tracing::warn;
 #[derive(Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
-    pub server: ServerConfig,
-    #[serde(default)]
+    pub server: ServerConfig,    #[serde(default)]
     pub print: PrintConfig,
     #[serde(default)]
     pub template: TemplateConfig,
@@ -45,6 +44,36 @@ fn default_true() -> bool {
     true
 }
 
+/// 以下默认值来自原 C# 打印服务的生产配置
+fn default_paper_width() -> f64 {
+    10.57
+}
+
+fn default_paper_height() -> f64 {
+    29.70
+}
+
+/// 打印纸张配置：打印脚本由 qr_service 生成（见 print_script），经 WS 下发给
+/// print-agent 执行，所以纸张边距等业务参数集中在服务器侧维护
+#[derive(Deserialize)]
+pub struct PrintConfig {
+    /// 自定义纸张宽度（cm）
+    #[serde(default = "default_paper_width")]
+    pub paper_width: f64,
+    /// 自定义纸张高度（cm）
+    #[serde(default = "default_paper_height")]
+    pub paper_height: f64,
+}
+
+impl Default for PrintConfig {
+    fn default() -> Self {
+        Self {
+            paper_width: default_paper_width(),
+            paper_height: default_paper_height(),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct TemplateConfig {
     /// 保存模板时是否把渲染 HTML 落地到 templates/template.html（仅供本地查看，渲染以数据库为准）
@@ -60,17 +89,6 @@ impl Default for TemplateConfig {
     }
 }
 
-/// 集中部署后服务器（可为 Linux）只负责渲染，打印动作由 Windows 机器上的
-/// print-agent 完成；打印机名/纸张等设置都在 print-agent 侧
-#[derive(Deserialize, Default)]
-pub struct PrintConfig {
-    /// 生成标签图片后是否同时发送到打印代理
-    #[serde(default)]
-    pub enabled: bool,
-    /// 打印代理地址，如 http://192.168.1.100:9195
-    #[serde(default)]
-    pub agent_url: String,
-}
 
 pub static CONFIG: LazyLock<Config> =
     LazyLock::new(|| match std::fs::read_to_string("config.toml") {
@@ -98,6 +116,16 @@ mod tests {
     }
 
     #[test]
+    fn print_paper_defaults_match_csharp_production() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.print.paper_width, 10.57);
+        assert_eq!(config.print.paper_height, 29.70);
+        let config: Config = toml::from_str("[print]\npaper_width = 15.0\npaper_height = 10.0").unwrap();
+        assert_eq!(config.print.paper_width, 15.0);
+        assert_eq!(config.print.paper_height, 10.0);
+    }
+
+    #[test]
     fn template_save_html_defaults_true_and_parses() {
         let config: Config = toml::from_str("").unwrap();
         assert!(config.template.save_html);
@@ -105,19 +133,4 @@ mod tests {
         assert!(!config.template.save_html);
     }
 
-    #[test]
-    fn parse_print_config() {
-        let config: Config =
-            toml::from_str("[print]\nenabled = true\nagent_url = \"http://192.168.1.100:9195\"")
-                .unwrap();
-        assert!(config.print.enabled);
-        assert_eq!(config.print.agent_url, "http://192.168.1.100:9195");
-    }
-
-    #[test]
-    fn missing_print_section_defaults_disabled() {
-        let config: Config = toml::from_str("").unwrap();
-        assert!(!config.print.enabled);
-        assert!(config.print.agent_url.is_empty());
-    }
 }

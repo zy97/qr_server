@@ -99,6 +99,19 @@ async fn watcher() -> Result<&'static TypstWatcher, CustomError> {
         .await
 }
 
+/// 渲染标签为 PNG（/label 与 /ws/agent 的渲染请求共用；typst 路径不支持模板选择）
+pub async fn render_labels(
+    labels: &[serde_json::Value],
+    _template: Option<&str>,
+) -> Result<Vec<u8>, CustomError> {
+    let mut result_image = None;
+    for label in labels {
+        let label: LabelInfo = serde_json::from_value(label.clone())?;
+        result_image = Some(render_label(&label).await?);
+    }
+    result_image.ok_or_else(|| CustomError::OtherLibraryError("no label data provided".to_string()))
+}
+
 #[post("/label")]
 async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responder, CustomError> {
     let request_started = Instant::now();
@@ -106,11 +119,8 @@ async fn create_label(labels: web::Json<Vec<LabelInfo>>) -> Result<impl Responde
     let label_count = labels.len();
 
     let mut result_image = None;
-    for label in labels {
-        let image = render_label(&label).await?;
-        if crate::config::CONFIG.print.enabled {
-            crate::print::print_label_png(&image).await?;
-        }
+    for label in &labels {
+        let image = render_label(label).await?;
         result_image = Some(image);
     }
 

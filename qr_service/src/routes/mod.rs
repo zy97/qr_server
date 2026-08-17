@@ -25,3 +25,15 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     #[cfg(feature = "agent-browser")]
     agent_browser::configure(cfg);
 }
+/// 当前编译特性对应的渲染实现，供 /ws/agent 的渲染请求调用
+pub async fn render_labels(
+    labels: &[serde_json::Value],
+    template: Option<&str>,
+) -> Result<Vec<u8>, crate::err::CustomError> {
+    #[cfg(feature = "typst")]
+    return typst::render_labels(labels, template).await;
+    #[cfg(feature = "chrome")]
+    return use_chrome_capture_screenshot::render_labels(labels, template).await;
+    #[cfg(feature = "agent-browser")]
+    return agent_browser::render_labels(labels, template).await;
+}

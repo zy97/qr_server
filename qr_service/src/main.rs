@@ -1,8 +1,9 @@
+mod agent_ws;
 mod child_cleanup;
 mod config;
 mod designer;
+mod print_script;
 pub mod err;
-mod print;
 #[cfg(feature = "typst")]
 mod requests;
 mod routes;
@@ -37,6 +38,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::DefaultHeaders::new().add(("Cache-Control", "no-cache")))
             .configure(routes::configure)
             .configure(designer::configure)
+            .configure(agent_ws::configure)
     })
     .bind((config::CONFIG.server.host.as_str(), config::CONFIG.server.port))?
     .run()

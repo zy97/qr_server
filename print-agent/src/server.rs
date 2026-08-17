@@ -1,45 +1,66 @@
 use std::future::Future;
 
 use axum::{
-    body::Bytes,
     extract::Query,
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
+    Json, Router,
 };
+use tower_http::cors::{AllowPrivateNetwork, CorsLayer};
 
 use crate::config::CONFIG;
 
 #[derive(serde::Deserialize)]
-struct PrintQuery {
+struct LabelQuery {
+    /// 指定渲染的模板（id 或名称），缺省用默认模板
+    template: Option<String>,
     /// 覆盖配置里的默认打印机
     printer: Option<String>,
 }
 
 fn router() -> Router {
     Router::new()
-        .route("/health", get(|| async { "ok" }))
-        .route("/print", post(print_handler))
+        .route("/health", get(health))
+        .route("/label", post(label_handler))
+        // 业务页面（http://<服务器>/...）跨域调本机 agent，放开 CORS；
+        // allow_private_network：Chrome 私网访问规则（PNA）下，内网/HTTPS 页面
+        // 调 127.0.0.1 需要预检响应带 Access-Control-Allow-Private-Network
+        .layer(CorsLayer::permissive().allow_private_network(AllowPrivateNetwork::yes()))
 }
 
-/// POST /print：body 为标签 PNG 原始字节；打印耗时约 1 秒（PowerShell 启动），
-/// 放进阻塞线程池，完成前不占用异步 worker
-async fn print_handler(Query(query): Query<PrintQuery>, body: Bytes) -> impl IntoResponse {
-    if body.is_empty() {
-        return (StatusCode::BAD_REQUEST, "空图片数据".to_string());
+async fn health() -> String {
+    if crate::ws_client::is_connected() {
+        "ok, qr_service 已连接".to_string()
+    } else {
+        "ok, qr_service 未连接".to_string()
     }
+}
+
+/// POST /label（工位浏览器调用）：body 为标签数据 JSON 数组。
+/// 完整链路：浏览器 → 本端点 → WS 转发 qr_service 渲染 → 回本机打印 →
+/// 真实打印结果（含队列监听）作为响应返回。成功时响应体为标签 PNG
+async fn label_handler(Query(query): Query<LabelQuery>, Json(labels): Json<serde_json::Value>) -> Response {
+    let labels = match labels.as_array() {
+        Some(arr) if !arr.is_empty() => arr.clone(),
+        _ => return (StatusCode::BAD_REQUEST, "请求体应为非空标签数据数组".to_string()).into_response(),
+    };
+    // 打印机名随渲染请求上行，qr_service 把它编进下发的打印脚本
     let printer = query
         .printer
         .unwrap_or_else(|| CONFIG.print.printer_name.clone());
-    let result = tokio::task::spawn_blocking(move || crate::print::print_png(&body, &printer)).await;
+    let (png, script) = match crate::ws_client::render(labels, query.template, printer).await {
+        Ok(ok) => ok,
+        Err(err) => return (StatusCode::BAD_GATEWAY, format!("渲染失败: {err}")).into_response(),
+    };
+    let png_for_print = png.clone();
+    let result =
+        tokio::task::spawn_blocking(move || crate::print::print_with_script(&script, &png_for_print)).await;
     match result {
-        Ok(Ok(())) => (StatusCode::OK, "已发送到打印机".to_string()),
-        Ok(Err(err)) => (StatusCode::INTERNAL_SERVER_ERROR, format!("打印失败: {err:#}")),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("打印任务执行异常: {err}"),
-        ),
+        // 成功：返回标签 PNG（与 qr_service /label 的契约一致，浏览器可直接展示）
+        Ok(Ok(())) => (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "image/png")], png).into_response(),
+        Ok(Err(err)) => (StatusCode::INTERNAL_SERVER_ERROR, format!("打印失败: {err:#}")).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, format!("打印任务执行异常: {err}")).into_response(),
     }
 }
 
@@ -47,6 +68,11 @@ async fn print_handler(Query(query): Query<PrintQuery>, body: Bytes) -> impl Int
 pub fn run(shutdown: impl Future<Output = ()> + Send + 'static) {
     let runtime = tokio::runtime::Runtime::new().expect("创建 tokio runtime 失败");
     runtime.block_on(async move {
+        // 先拉起与 qr_service 的 WS 长连接（断线自动重连）
+        crate::ws_client::start();
+        if CONFIG.server.url.is_empty() {
+            tracing::warn!("未配置 server.url（qr_service 地址），/label 将不可用");
+        }
         let addr = format!("0.0.0.0:{}", CONFIG.server.port);
         let listener = tokio::net::TcpListener::bind(&addr)
             .await

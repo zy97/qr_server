@@ -84,20 +84,37 @@ async fn chrome_state() -> Result<&'static ChromeState, CustomError> {
         .map_err(CustomError::from)
 }
 
-/// /label 查询参数：?print=false 跳过打印（模板设计器预览用）
+/// /label 查询参数：template 指定渲染模板（id 或名称），缺省用默认模板。
+/// 打印由工位浏览器 → 本机 print-agent → /ws/agent 链路驱动，/label 只负责渲染
 #[derive(serde::Deserialize)]
 pub struct LabelQuery {
-    print: Option<bool>,
-    /// 指定渲染的模板（id 或名称），缺省用默认模板
     template: Option<String>,
-}
-
-fn should_print(config_enabled: bool, query: &LabelQuery) -> bool {
-    config_enabled && query.print != Some(false)
 }
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
+}
+
+/// 渲染标签为 PNG（/label 与 /ws/agent 的渲染请求共用）
+pub async fn render_labels(
+    labels: &[serde_json::Value],
+    template: Option<&str>,
+) -> Result<Vec<u8>, CustomError> {
+    let mut result_image = None;
+    let (templates, template_html) = load_templates(template)?;
+    for label in labels {
+        let render_started = Instant::now();
+        let context = build_template_context(label, &template_html)?;
+
+        let rendered = templates.render("template.html", &context)?;
+        info!(
+            elapsed_ms = render_started.elapsed().as_millis(),
+            "chrome template rendered"
+        );
+
+        result_image = Some(capture_label_screenshot(&rendered).await?);
+    }
+    result_image.ok_or_else(|| CustomError::OtherLibraryError("no label data provided".to_string()))
 }
 
 #[post("/label")]
@@ -107,30 +124,8 @@ async fn create_label(
 ) -> Result<impl Responder, CustomError> {
     // 使用chromiumoxide重构耗时在200ms附近跳动
     let request_started = Instant::now();
-    let labels = labels.into_inner();
     let label_count = labels.len();
-    let mut result_image = None;
-
-    let (templates, template_html) = load_templates(query.template.as_deref())?;
-    for label in labels {
-        let render_started = Instant::now();
-        let context = build_template_context(&label, &template_html)?;
-
-        let rendered = templates.render("template.html", &context)?;
-        info!(
-            elapsed_ms = render_started.elapsed().as_millis(),
-            "chrome template rendered"
-        );
-
-        let image_data = capture_label_screenshot(&rendered).await?;
-        if should_print(crate::config::CONFIG.print.enabled, &query) {
-            crate::print::print_label_png(&image_data).await?;
-        }
-        result_image = Some(image_data);
-    }
-
-    let result_image = result_image
-        .ok_or_else(|| CustomError::OtherLibraryError("no label data provided".to_string()))?;
+    let result_image = render_labels(&labels, query.template.as_deref()).await?;
     info!(
         elapsed_ms = request_started.elapsed().as_millis(),
         label_count, "chrome label response finished"
@@ -519,25 +514,6 @@ fn html_data_url(html: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    #[test]
-    fn print_query_flag_overrides_config() {
-        let default = LabelQuery {
-            print: None,
-            template: None,
-        };
-        let off = LabelQuery {
-            print: Some(false),
-            template: None,
-        };
-        let on = LabelQuery {
-            print: Some(true),
-            template: None,
-        };
-        assert!(should_print(true, &default));
-        assert!(!should_print(false, &default));
-        assert!(!should_print(true, &off));
-        assert!(should_print(true, &on));
-    }
     use super::*;
 
     const SAMPLE_QR: &str = "M001|L001|O001|10|V001|2026-08-07|B001";

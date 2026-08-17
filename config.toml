@@ -5,12 +5,6 @@
 host = "0.0.0.0"
 port = 9095
 
-[print]
-# 生成标签图片后是否同时发送打印（POST 给 print-agent，由它送到 Windows 打印机）
-enabled = false
-# 打印代理地址（运行 print-agent 的 Windows 机器）
-agent_url = "http://127.0.0.1:9195"
-
 [template]
 # 保存模板时是否把渲染 HTML 落地到 templates/template.html（仅供本地查看，渲染以数据库为准）
 save_html = true

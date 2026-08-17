@@ -1,6 +1,7 @@
 mod config;
 mod print;
 mod server;
+mod ws_client;
 #[cfg(windows)]
 mod win_service;
 

@@ -3,10 +3,15 @@
 集中式标签打印方案：**qr_service**（模板设计 + 渲染，部署在 Linux 服务器）+ **print-agent**（打印代理，部署在每台接打印机的 Windows 工位）。
 
 ```
-业务系统 ──POST /label──> qr_service (Linux) ──POST /print──> print-agent (Windows) ──> 打印机
-                              │ 模板设计器: http://<服务器>:9095/designer
-                              └── 渲染出 PNG
+工位浏览器 ──POST http://127.0.0.1:9195/label──▶ 本机 print-agent
+print-agent ──WS 长连接（主动外连，连接即工位身份）──▶ qr_service (Linux)
+qr_service ──渲染 PNG，沿同一条 WS 返回──▶ print-agent ──打印──▶ 真实结果回到浏览器
 ```
+
+- 服务器**不需要配置任何工位地址**：新增工位 = 装 print-agent 并填服务器地址
+- 打印失败（脱机/缺纸/卡纸/超时）的真实原因会随响应返回给工位浏览器
+- 打印脚本（纸张/边距/队列监听规则）由 qr_service 统一生成、随渲染结果经 WS 下发，调整打印行为只需升级服务器，工位 agent 不用动
+- 在线工位列表：`http://<服务器>:9095/api/agents`；模板设计器：`http://<服务器>:9095/designer`
 
 ## 一键安装
 
@@ -36,7 +41,7 @@ irm https://raw.githubusercontent.com/zy97/qr_server/master/scripts/install-prin
 
 重复执行即升级：会先停服务、替换程序、再启动；已有 `print-agent.toml` 不会被覆盖。
 
-安装后在服务器侧 `config.toml` 把 `[print] agent_url` 指向该工位，如 `http://192.168.1.100:9195`。
+安装后编辑 `C:\print-agent\print-agent.toml` 把 `[server] url` 指向 qr_service（如 `ws://192.168.1.10:9095/ws/agent`，也可安装时用 `-ServerUrl` 指定），重启服务生效：`Restart-Service print-agent`。
 
 ### 服务器（Linux，qr_service）
 
@@ -63,7 +68,7 @@ curl -fsSL https://raw.githubusercontent.com/zy97/qr_server/master/scripts/insta
 安装完成后：
 
 - 设计器入口：`http://<服务器IP>:9095/designer`
-- 编辑 `/opt/qr_service/config.toml` 的 `[print] agent_url` 指向各打印工位，`enabled = true` 开启打印
+- qr_service 无需配置工位地址；打印链路完全由 print-agent 主动外连建立
 - 改完配置重启：`systemctl restart qr_service`
 
 ## 发布（CI/CD）

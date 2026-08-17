@@ -1,8 +1,12 @@
 # print-agent 配置：放在 exe 同目录（或启动目录）下，文件名 print-agent.toml
 
 [server]
-# HTTP 监听端口
+# 本机 HTTP 监听端口（工位浏览器调 http://127.0.0.1:9195/label）
 port = 9195
+# qr_service 的 WebSocket 接入地址（必填，指向部署 qr_service 的服务器）
+url = "ws://192.168.1.10:9095/ws/agent"
+# 工位标识（显示在 qr_service /api/agents），缺省取机器名
+# station = "PACK-LINE3-PC01"
 
 [print]
 # 目标打印机名（Windows 打印机列表中的名称）；请求可用 ?printer= 覆盖

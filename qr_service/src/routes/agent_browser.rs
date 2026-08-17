@@ -35,27 +35,18 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(create_label);
 }
 
-/// /label 查询参数：template 指定渲染模板（id 或名称），缺省用默认模板；print=false 跳过打印（模板设计器预览用）
+/// /label 查询参数：template 指定渲染模板（id 或名称），缺省用默认模板。
+/// 打印由工位浏览器 → 本机 print-agent → /ws/agent 链路驱动，/label 只负责渲染
 #[derive(serde::Deserialize)]
 pub struct LabelQuery {
     template: Option<String>,
-    print: Option<bool>,
 }
 
-/// 与 chrome 渲染路径一致的打印开关语义：配置开启且请求未显式 print=false 才打印
-fn should_print(config_enabled: bool, query: &LabelQuery) -> bool {
-    config_enabled && query.print != Some(false)
-}
-
-#[post("/label")]
-async fn create_label(
-    labels: web::Json<Vec<serde_json::Value>>,
-    query: web::Query<LabelQuery>,
-) -> Result<impl Responder, CustomError> {
-    // 整个图片渲染时间大致在200-300ms附近跳动
-    let request_started = Instant::now();
-    let labels = labels.into_inner();
-    let label_count = labels.len();
+/// 渲染标签为 PNG（/label 与 /ws/agent 的渲染请求共用）
+pub async fn render_labels(
+    labels: &[serde_json::Value],
+    template: Option<&str>,
+) -> Result<Vec<u8>, CustomError> {
     let current_dir = env::current_dir()?;
     let agent_browser_path = current_dir.join("agent-browser.exe");
     let agent_browser_dir = agent_browser_path
@@ -63,10 +54,10 @@ async fn create_label(
         .ok_or_else(|| CustomError::OtherLibraryError("invalid agent-browser path".to_string()))?;
     let mut result_image = None;
 
-    let (templates, template_html) = load_templates(query.template.as_deref())?;
+    let (templates, template_html) = load_templates(template)?;
     for label in labels {
         let render_started = Instant::now();
-        let context = build_template_context(&label, &template_html)?;
+        let context = build_template_context(label, &template_html)?;
 
         let rendered = templates.render("template.html", &context)?;
         info!(
@@ -113,14 +104,21 @@ async fn create_label(
             "agent-browser screenshot read"
         );
         info!("agent-browser rendered {}", output_path.path().display());
-        if should_print(crate::config::CONFIG.print.enabled, &query) {
-            crate::print::print_label_png(&image_data).await?;
-        }
         result_image = Some(image_data);
     }
+    result_image.ok_or_else(|| CustomError::OtherLibraryError("no label data provided".to_string()))
+}
 
-    let result_image = result_image
-        .ok_or_else(|| CustomError::OtherLibraryError("no label data provided".to_string()))?;
+#[post("/label")]
+async fn create_label(
+    labels: web::Json<Vec<serde_json::Value>>,
+    query: web::Query<LabelQuery>,
+) -> Result<impl Responder, CustomError> {
+    // 整个图片渲染时间大致在200-300ms附近跳动
+    let request_started = Instant::now();
+    let label_count = labels.len();
+    let result_image = render_labels(&labels, query.template.as_deref()).await?;
+
     info!(
         elapsed_ms = request_started.elapsed().as_millis(),
         label_count, "agent-browser label response finished"
