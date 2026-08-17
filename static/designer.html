@@ -135,7 +135,7 @@ labelProvider.prototype.addElementTypes = function (context) {
   context.addPrintElementTypes('labelModule', [
     new hiprint.PrintElementTypeGroup('标签字段', fieldEls),
     new hiprint.PrintElementTypeGroup('基础元素', [
-      { tid: 'labelModule.text',  title: '固定文本', type: 'text', data: '文本', options: { width: 80, height: 24, fontSize: 10.5, fontWeight: '700' } },
+      { tid: 'labelModule.text',  title: '固定文本', type: 'text', data: '文本', options: { width: 80, height: 24, fontSize: 10.5, fontWeight: '700', textAlign: 'center', textContentVerticalAlign: 'middle', borderLeft: 'solid', borderTop: 'solid', borderRight: 'solid', borderBottom: 'solid', borderWidth: 0.75, borderColor: '#000000' } },
       { tid: 'labelModule.image', title: '图片', type: 'image', data: '', options: { width: 60, height: 40 } },
       { tid: 'labelModule.hline', title: '横线', type: 'hline', options: { width: 120 } },
       { tid: 'labelModule.vline', title: '竖线', type: 'vline', options: { height: 120 } },
@@ -833,7 +833,16 @@ $('#btn-panel').on('click', () => {
   setStatus('面板已调整为 ' + w + 'mm × ' + h + 'mm，保存后生效');
 });
 $('#btn-preview').on('click', () => {
-  $('#preview-json').val(localStorage.getItem(PREVIEW_STORAGE_KEY + '_' + templateId) || JSON.stringify(buildPreviewData(), null, 2));
+  // 始终以当前模板实际使用的字段为基础生成；缓存仅回填同名字段的值，
+  // 避免缓存里的旧内容缺少模板新增字段（或残留模板已删字段）
+  const freshData = buildPreviewData();
+  try {
+    const cached = JSON.parse(localStorage.getItem(PREVIEW_STORAGE_KEY + '_' + templateId) || 'null');
+    if (cached && typeof cached === 'object' && !Array.isArray(cached)) {
+      Object.keys(freshData).forEach(k => { if (k in cached) freshData[k] = cached[k]; });
+    }
+  } catch (e) { /* 缓存内容损坏则忽略 */ }
+  $('#preview-json').val(JSON.stringify(freshData, null, 2));
   $('#preview-fields').text('当前模板使用字段：' + (collectUsedFields().map(displayFieldName).join('、') || '（无）'));
   $('#preview-mask').fadeIn(100);
   renderPreview();
