@@ -35,12 +35,13 @@ if [[ -z "$VERSION" ]]; then
 fi
 echo "==> 安装 qr_service v$VERSION 到 $INSTALL_DIR"
 
-systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 mkdir -p "$INSTALL_DIR"
 
-# 1. dist 构建的二进制
+# 1. dist 构建的二进制。先下载后停服务：下载可能很慢甚至失败，
+# 期间旧版本继续提供服务，停服窗口只剩本地替换的几秒
 echo "==> 下载二进制（GitHub Release）..."
 dl "${GH_PROXY}https://github.com/$REPO/releases/download/v${VERSION}/qr_service-x86_64-unknown-linux-gnu.tar.xz" -o /tmp/qr_service.tar.xz
+systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 tar -xJf /tmp/qr_service.tar.xz -C "$INSTALL_DIR"
 rm /tmp/qr_service.tar.xz
 # dist 压缩包可能带一层子目录，把二进制归位
@@ -80,6 +81,10 @@ WorkingDirectory=$INSTALL_DIR
 ExecStart=$INSTALL_DIR/qr_service
 Restart=always
 RestartSec=5
+# 显式声明 cgroup 级联终止（也是默认值）：停止/重启/关机时连带杀掉
+# chrome、typst watch 等全部子孙进程，等价于 Windows 的 KILL_ON_JOB_CLOSE
+KillMode=control-group
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target
