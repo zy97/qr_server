@@ -757,6 +757,9 @@ function buildTemplateHtml() {
   (hiprintTemplate.getPanel(0).printElements || []).forEach(e => {
     if (e.updateDesignViewFromOptions) e.updateDesignViewFromOptions();
   });
+  // updateDesignViewFromOptions 会把 options 的完整边框以内联样式写回画布 DOM，
+  // 覆盖共享边规范化的结果（贴合处两边都画、线条变粗）——与「移动/新增」路径一致，重算一次
+  normalizeSharedBorders(document.querySelector('#design-canvas'));
   let json = hiprintTemplate.getJson();
   if (typeof json === 'string') json = JSON.parse(json);
   syncFieldsFromCanvas(json, true);
