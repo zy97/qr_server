@@ -18,3 +18,7 @@ tracing-subscriber = { version = "0.3.23", features = ["registry", "std"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8"
+
+# 打印代理只部署 Windows，发布只构建 Windows 包（package-local，覆盖 dist-workspace.toml 的全局 targets）
+[package.metadata.dist]
+targets = ["x86_64-pc-windows-msvc"]
