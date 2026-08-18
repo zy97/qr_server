@@ -53,16 +53,18 @@ async fn chrome_state() -> Result<&'static ChromeState, CustomError> {
             let config = BrowserConfig::builder()
                 .window_size(BROWSER_WINDOW_WIDTH, BROWSER_WINDOW_HEIGHT)
                 .user_data_dir(&user_data_dir)
+                // 服务器以 root 运行（systemd 默认）时 Chrome 必须关闭 sandbox，
+                // 否则启动即退出（crbug.com/638180）。
+                // 注意：chromiumoxide 的自定义参数不能带 -- 前缀，
+                // 它内部按 key 统一格式化为 --{key}，带前缀会变成 --- 被 Chrome 忽略
                 .args([
-                    // 服务器以 root 运行（systemd 默认）时 Chrome 必须关闭 sandbox，
-                    // 否则启动即退出（crbug.com/638180）
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-gpu",
-                    "--force-device-scale-factor=1",
-                    "--disable-background-timer-throttling",
-                    "--disable-renderer-backgrounding",
-                    "--disable-backgrounding-occluded-windows",
+                    "no-sandbox",
+                    "disable-setuid-sandbox",
+                    "disable-gpu",
+                    "force-device-scale-factor=1",
+                    "disable-background-timer-throttling",
+                    "disable-renderer-backgrounding",
+                    "disable-backgrounding-occluded-windows",
                 ])
                 .build()
                 .map_err(anyhow::Error::msg)?;
