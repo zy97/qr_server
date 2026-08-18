@@ -26,9 +26,10 @@ dl() {
     curl -fL --connect-timeout 15 --retry 3 --retry-delay 2 "$@"
 }
 
-# 列出所有 Release 的 tag（含按包发布的 包名/vX.Y.Z 形式）
+# 列出所有 Release 的 tag（含按包发布的 包名/vX.Y.Z 形式）。
+# 用 sed 而不是 grep -oP：老系统（如 CentOS 7）的 grep 没有可用的 PCRE 支持
 list_tags() {
-    dl -s "https://api.github.com/repos/$REPO/releases" | grep -oP '"tag_name":\s*"\K[^"]+'
+    dl -s "https://api.github.com/repos/$REPO/releases" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
 # 解析用户指定的版本：接受 0.3.0 / v0.3.0 / qr_service/v0.3.0，验证 Release 真实存在
@@ -50,8 +51,9 @@ resolve_user_tag() {
 resolve_latest_tag() {
     local tags tag
     tags=$(list_tags)
-    tag=$(printf '%s\n' "$tags" | grep -P "^$PKG_PREFIX/v?\d+\.\d+\.\d+" | sort -V | tail -1)
-    [[ -z "$tag" ]] && tag=$(printf '%s\n' "$tags" | grep -P "^v?\d+\.\d+\.\d+" | sort -V | tail -1)
+    # grep 无匹配时退出码为 1，pipefail 下会让赋值失败、set -e 直接退出，|| true 才能走到下面的回退分支
+    tag=$(printf '%s\n' "$tags" | grep -E "^$PKG_PREFIX/v?[0-9]+\.[0-9]+\.[0-9]+" | sort -V | tail -1) || true
+    [[ -z "$tag" ]] && tag=$(printf '%s\n' "$tags" | grep -E "^v?[0-9]+\.[0-9]+\.[0-9]+" | sort -V | tail -1)
     if [[ -z "$tag" ]]; then
         echo "未找到任何 Release（api.github.com 不可达？），可显式指定: sudo ./install-qr-service.sh 0.3.0" >&2
         exit 1
@@ -81,7 +83,8 @@ rm -rf /tmp/qr_service-bin
 mkdir -p /tmp/qr_service-bin
 tar -xJf /tmp/qr_service.tar.xz -C /tmp/qr_service-bin
 rm /tmp/qr_service.tar.xz
-found=$(find /tmp/qr_service-bin -name qr_service -type f | head -1)
+# head 提前关闭管道时 find 可能收到 SIGPIPE（退出码 141），pipefail 下同样会静默退出
+found=$(find /tmp/qr_service-bin -name qr_service -type f | head -1) || true
 [[ -z "$found" ]] && { echo "压缩包里没找到 qr_service 二进制" >&2; exit 1; }
 cp "$found" "$INSTALL_DIR/qr_service.new"
 chmod +x "$INSTALL_DIR/qr_service.new"
@@ -118,9 +121,11 @@ done
 if [[ -z "$CHROME_PATH" ]]; then
     # agent-browser install 通过 Playwright 下载 Chrome for Testing，浏览器位于 ms-playwright 缓存目录。
     # 调用者与 systemd 服务可能使用不同 HOME，因此同时检查 root 和普通用户缓存。
+    # find 的任一搜索根目录不存在都会返回非 0（错误已被 2>/dev/null 吞掉），
+    # 在 set -e + pipefail 下会导致赋值失败、脚本静默退出，必须 || true 兜底
     CHROME_PATH=$(find "$HOME/.cache/ms-playwright" /root/.cache/ms-playwright /home/*/.cache/ms-playwright \
         -type f \( -path '*/chrome-linux*/chrome' -o -path '*/chrome-headless-shell-linux*/chrome-headless-shell' \) \
-        2>/dev/null | sort -V | tail -1)
+        2>/dev/null | sort -V | tail -1) || true
 fi
 if [[ -n "$CHROME_PATH" ]]; then
     echo "==> 渲染浏览器: $CHROME_PATH"
@@ -152,7 +157,9 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now "$SERVICE_NAME"
+# enable --now 需要 systemd 220+（CentOS 7 是 219），拆成两步兼容老系统
+systemctl enable "$SERVICE_NAME"
+systemctl start "$SERVICE_NAME"
 
 # 防火墙放行 9095（qr_service 默认监听 0.0.0.0:9095；按实际存在的防火墙工具处理）
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
