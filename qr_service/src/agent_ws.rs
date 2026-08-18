@@ -8,12 +8,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 
-use actix_web::{get, web, HttpRequest, HttpResponse};
+use actix_web::{delete, get, put, web, HttpRequest, HttpResponse};
 use actix_ws::AggregatedMessage;
 use base64::{engine::general_purpose, Engine};
 use serde::Deserialize;
 
 use crate::err::CustomError;
+use crate::template_store as store;
 
 /// agent → server 的渲染请求
 #[derive(Deserialize)]
@@ -29,13 +30,18 @@ enum AgentMessage {
     },
 }
 
-/// 渲染成功：除 PNG 外一并下发打印脚本（打印逻辑集中在服务器维护，见 print_script）
-fn render_ok(job_id: &str, png: &[u8], printer: Option<&str>) -> String {
+/// 渲染成功：除 PNG 外一并下发打印脚本（打印逻辑集中在服务器维护，见 print_script）。
+/// 打印机与纸张由工位级设置覆盖；未覆盖字段回退代理本地配置 / 服务器全局配置
+fn render_ok(job_id: &str, png: &[u8], printer: Option<&str>, settings: &store::AgentSettings) -> String {
     serde_json::json!({
         "type": "render_ok",
         "job_id": job_id,
         "png_base64": general_purpose::STANDARD.encode(png),
-        "print_script": crate::print_script::build_print_script(printer.unwrap_or("")),
+        "print_script": crate::print_script::build_print_script(
+            printer.unwrap_or(""),
+            settings.paper_width,
+            settings.paper_height,
+        ),
     })
     .to_string()
 }
@@ -96,7 +102,7 @@ fn registry_remove(station: &str, conn_id: u64) {
     }
 }
 
-async fn handle_agent_message(text: &str) -> Option<String> {
+async fn handle_agent_message(text: &str, station: &str) -> Option<String> {
     let message: AgentMessage = match serde_json::from_str(text) {
         Ok(m) => m,
         Err(err) => {
@@ -110,10 +116,26 @@ async fn handle_agent_message(text: &str) -> Option<String> {
             template,
             labels,
             printer,
-        } => match crate::routes::render_labels(&labels, template.as_deref()).await {
-            Ok(png) => Some(render_ok(&job_id, &png, printer.as_deref())),
-            Err(err) => Some(render_err(&job_id, &err.to_string())),
-        },
+        } => {
+            // 代理管理页面可为工位指定打印机/纸张；未覆盖的字段用代理本地配置
+            let settings = agent_settings(station).unwrap_or_default();
+            let printer = settings.printer.clone().or(printer);
+            match crate::routes::render_labels(&labels, template.as_deref()).await {
+                Ok(png) => Some(render_ok(&job_id, &png, printer.as_deref(), &settings)),
+                Err(err) => Some(render_err(&job_id, &err.to_string())),
+            }
+        }
+    }
+}
+
+/// 服务器侧工位打印设置覆盖；读取失败时视为无覆盖，不阻断打印
+fn agent_settings(station: &str) -> Option<store::AgentSettings> {
+    match store::with_db(|conn| store::get_agent_settings(conn, station)) {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::warn!(station, error = %err, "读取工位打印设置失败，按未覆盖处理");
+            None
+        }
     }
 }
 
@@ -155,7 +177,7 @@ async fn agent_ws(
         while let Some(Ok(message)) = stream.recv().await {
             match message {
                 AggregatedMessage::Text(text) => {
-                    if let Some(reply) = handle_agent_message(&text).await {
+                    if let Some(reply) = handle_agent_message(&text, &station).await {
                         if session.text(reply).await.is_err() {
                             break;
                         }
@@ -178,24 +200,82 @@ async fn agent_ws(
 /// 在线工位列表（运维查看用）
 #[get("/api/agents")]
 async fn list_agents() -> HttpResponse {
-    let registry = REGISTRY.lock().expect("registry poisoned");
-    let agents: Vec<_> = registry
-        .agents
-        .iter()
-        .map(|(station, agent)| {
+    // 先拷贝注册表快照再查覆盖设置，避免同时持有注册表锁与数据库锁
+    let snapshot: Vec<_> = {
+        let registry = REGISTRY.lock().expect("registry poisoned");
+        registry
+            .agents
+            .iter()
+            .map(|(station, agent)| {
+                (
+                    station.clone(),
+                    agent.ip.clone(),
+                    agent.mac.clone(),
+                    agent.connected_at.elapsed().as_secs(),
+                )
+            })
+            .collect()
+    };
+    let agents: Vec<_> = snapshot
+        .into_iter()
+        .map(|(station, ip, mac, secs)| {
+            let settings = agent_settings(&station).unwrap_or_default();
             serde_json::json!({
                 "station": station,
-                "ip": agent.ip,
-                "mac": agent.mac,
-                "connected_secs": agent.connected_at.elapsed().as_secs(),
+                "ip": ip,
+                "mac": mac,
+                "connected_secs": secs,
+                "printer_override": settings.printer,
+                "paper_width": settings.paper_width,
+                "paper_height": settings.paper_height,
             })
         })
         .collect();
     HttpResponse::Ok().json(agents)
 }
 
+#[derive(Deserialize)]
+struct SetAgentSettingsRequest {
+    printer: Option<String>,
+    /// 自定义纸张宽度（cm）
+    paper_width: Option<f64>,
+    /// 自定义纸张高度（cm）
+    paper_height: Option<f64>,
+}
+
+/// 设置/更新工位打印设置覆盖；空打印机名视为不覆盖打印机
+#[put("/api/agents/{station}/settings")]
+async fn set_agent_settings(
+    path: web::Path<String>,
+    body: web::Json<SetAgentSettingsRequest>,
+) -> Result<HttpResponse, CustomError> {
+    let station = path.into_inner();
+    let settings = store::AgentSettings {
+        printer: body
+            .printer
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string),
+        paper_width: body.paper_width,
+        paper_height: body.paper_height,
+    };
+    store::with_db(|conn| store::set_agent_settings(conn, &station, &settings))?;
+    Ok(HttpResponse::Ok().finish())
+}
+
+/// 清除工位打印设置覆盖，回退代理本地配置 + 服务器全局纸张
+#[delete("/api/agents/{station}/settings")]
+async fn clear_agent_settings(path: web::Path<String>) -> Result<HttpResponse, CustomError> {
+    store::with_db(|conn| store::delete_agent_settings(conn, &path.into_inner()))?;
+    Ok(HttpResponse::Ok().finish())
+}
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(agent_ws).service(list_agents);
+    cfg.service(agent_ws)
+        .service(list_agents)
+        .service(set_agent_settings)
+        .service(clear_agent_settings);
 }
 
 #[cfg(test)]
@@ -225,7 +305,7 @@ mod tests {
 
     #[test]
     fn render_ok_carries_base64_png() {
-        let text = render_ok("1-7", b"png-bytes", Some("ZDesigner ZT231-300dpi ZPL"));
+        let text = render_ok("1-7", b"png-bytes", Some("ZDesigner ZT231-300dpi ZPL"), &store::AgentSettings::default());
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value["type"], "render_ok");
         assert_eq!(value["job_id"], "1-7");

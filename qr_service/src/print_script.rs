@@ -5,11 +5,16 @@
 use crate::config::CONFIG;
 
 /// 生成完整打印脚本（含任务监听）。printer_name 为空时打印到系统默认打印机。
-/// 纸张来自服务器 config.toml 的 [print] 段（cm → 1/100 英寸换算与原 C# 一致）
-pub fn build_print_script(printer_name: &str) -> String {
+/// 纸张宽高（cm）可由工位级设置覆盖；None 时回退服务器 config.toml 的 [print] 段
+/// （cm → 1/100 英寸换算与原 C# 一致）
+pub fn build_print_script(
+    printer_name: &str,
+    paper_width: Option<f64>,
+    paper_height: Option<f64>,
+) -> String {
     let print_config = &CONFIG.print;
-    let paper_width = (print_config.paper_width / 2.54 * 100.0) as i32;
-    let paper_height = (print_config.paper_height / 2.54 * 100.0) as i32;
+    let paper_width = (paper_width.unwrap_or(print_config.paper_width) / 2.54 * 100.0) as i32;
+    let paper_height = (paper_height.unwrap_or(print_config.paper_height) / 2.54 * 100.0) as i32;
     build_script(printer_name, paper_width, paper_height)
 }
 
@@ -76,6 +81,15 @@ exit 2;"#
 mod tests {
     use super::*;
 
+    #[test]
+    fn station_paper_override_wins_over_global_config() {
+        // 15cm x 10cm -> 590 x 393 (1/100 英寸，向下取整)
+        let script = build_print_script("P1", Some(15.0), Some(10.0));
+        assert!(script.contains("PaperSize('CustomSize', 590, 393)"));
+        // 未覆盖时回退 config.toml 默认值 10.57 x 29.70 -> 416 x 1169
+        let script = build_print_script("P1", None, None);
+        assert!(script.contains("PaperSize('CustomSize', 416, 1169)"));
+    }
     #[test]
     fn print_script_matches_csharp_logic() {
         // 10.57cm x 29.70cm -> 416 x 1169 (1/100 英寸)

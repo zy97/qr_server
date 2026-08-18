@@ -10,7 +10,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use crate::err::CustomError;
@@ -70,9 +70,78 @@ fn open(path: &Path) -> Result<Connection, CustomError> {
             render_html TEXT NOT NULL,
             is_default  INTEGER NOT NULL DEFAULT 0,
             updated_at  INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS agent_settings (
+            station TEXT PRIMARY KEY,
+            printer TEXT,
+            paper_width REAL,
+            paper_height REAL
         );",
     )?;
     Ok(conn)
+}
+
+/// 工位级打印设置覆盖。字段为 None（NULL）时不覆盖：
+/// 打印机回退代理本地配置，纸张宽高回退服务器 config.toml 的 [print] 段
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AgentSettings {
+    pub printer: Option<String>,
+    /// 自定义纸张宽度（cm）
+    pub paper_width: Option<f64>,
+    /// 自定义纸张高度（cm）
+    pub paper_height: Option<f64>,
+}
+
+/// 保存指定工位的打印设置覆盖；同工位重复保存即更新
+pub fn set_agent_settings(
+    conn: &Connection,
+    station: &str,
+    settings: &AgentSettings,
+) -> Result<(), CustomError> {
+    conn.execute(
+        "INSERT INTO agent_settings (station, printer, paper_width, paper_height)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(station) DO UPDATE SET
+             printer = excluded.printer,
+             paper_width = excluded.paper_width,
+             paper_height = excluded.paper_height",
+        params![
+            station,
+            settings.printer,
+            settings.paper_width,
+            settings.paper_height
+        ],
+    )?;
+    Ok(())
+}
+
+/// 读取工位的打印设置覆盖；从未设置返回 None
+pub fn get_agent_settings(
+    conn: &Connection,
+    station: &str,
+) -> Result<Option<AgentSettings>, CustomError> {
+    Ok(conn
+        .query_row(
+            "SELECT printer, paper_width, paper_height FROM agent_settings WHERE station = ?1",
+            params![station],
+            |r| {
+                Ok(AgentSettings {
+                    printer: r.get(0)?,
+                    paper_width: r.get(1)?,
+                    paper_height: r.get(2)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+/// 清除工位的打印设置覆盖
+pub fn delete_agent_settings(conn: &Connection, station: &str) -> Result<(), CustomError> {
+    conn.execute(
+        "DELETE FROM agent_settings WHERE station = ?1",
+        params![station],
+    )?;
+    Ok(())
 }
 
 fn lock_db() -> MutexGuard<'static, Connection> {
@@ -328,12 +397,40 @@ mod tests {
                 render_html TEXT NOT NULL,
                 is_default  INTEGER NOT NULL DEFAULT 0,
                 updated_at  INTEGER NOT NULL
+            );
+            CREATE TABLE agent_settings (
+                station TEXT PRIMARY KEY,
+                printer TEXT,
+                paper_width REAL,
+                paper_height REAL
             );",
         )
         .expect("create table");
         conn
     }
 
+
+    #[test]
+    fn agent_settings_override_roundtrip() {
+        let conn = test_conn();
+        assert_eq!(get_agent_settings(&conn, "S1").unwrap(), None);
+        let settings = AgentSettings {
+            printer: Some("Zebra A".to_string()),
+            paper_width: Some(10.0),
+            paper_height: None, // 允许只覆盖部分字段
+        };
+        set_agent_settings(&conn, "S1", &settings).unwrap();
+        assert_eq!(get_agent_settings(&conn, "S1").unwrap(), Some(settings));
+        let updated = AgentSettings {
+            printer: Some("Zebra B".to_string()),
+            paper_width: None,
+            paper_height: Some(7.0),
+        };
+        set_agent_settings(&conn, "S1", &updated).unwrap(); // 重复保存即整体更新
+        assert_eq!(get_agent_settings(&conn, "S1").unwrap(), Some(updated));
+        delete_agent_settings(&conn, "S1").unwrap();
+        assert_eq!(get_agent_settings(&conn, "S1").unwrap(), None);
+    }
     fn seed_test_default(conn: &Connection) {
         seed_default(
             conn,
