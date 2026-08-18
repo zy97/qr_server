@@ -101,9 +101,28 @@ cp -rn /tmp/qr_server-src/templates/. "$INSTALL_DIR/templates/"
 [[ -f "$INSTALL_DIR/config.toml" ]] || cp /tmp/qr_server-src/config.toml "$INSTALL_DIR/config.toml"
 rm -rf /tmp/qr_server-src /tmp/qr_server-src.tar.gz
 
-# 3. 渲染浏览器：默认 chrome 特性需要 Chrome/Chromium；只提示不强制
-if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1 && ! command -v google-chrome >/dev/null 2>&1; then
-    echo "提示: 未检测到 Chrome/Chromium（chrome 渲染特性需要），如: apt install chromium-browser"
+# 3. 渲染浏览器：chrome 特性经 chromiumoxide 探测（CHROME 环境变量 → PATH → 常见安装路径）。
+# 优先系统 Chrome/Chromium；没有则回落到 agent-browser 安装的浏览器，
+# 并把路径写进 systemd unit 的 CHROME 环境变量
+CHROME_PATH=""
+for c in chromium chromium-browser google-chrome google-chrome-stable chrome; do
+    if command -v "$c" >/dev/null 2>&1; then
+        CHROME_PATH=$(command -v "$c")
+        break
+    fi
+done
+if [[ -z "$CHROME_PATH" ]]; then
+    # agent-browser install 通过 Playwright 下载 Chrome for Testing，浏览器位于 ms-playwright 缓存目录。
+    # 调用者与 systemd 服务可能使用不同 HOME，因此同时检查 root 和普通用户缓存。
+    CHROME_PATH=$(find "$HOME/.cache/ms-playwright" /root/.cache/ms-playwright /home/*/.cache/ms-playwright \
+        -type f \( -path '*/chrome-linux*/chrome' -o -path '*/chrome-headless-shell-linux*/chrome-headless-shell' \) \
+        2>/dev/null | sort -V | tail -1)
+fi
+if [[ -n "$CHROME_PATH" ]]; then
+    echo "==> 渲染浏览器: $CHROME_PATH"
+else
+    echo "提示: 未检测到 Chrome/Chromium 或 agent-browser 浏览器（chrome 渲染特性需要），"
+    echo "      如: apt install chromium-browser，或 agent-browser install 后重跑本脚本"
 fi
 
 # 4. systemd 开机自启服务
@@ -114,6 +133,7 @@ Description=qr_service 标签模板设计与渲染服务
 After=network.target
 
 [Service]
+$( [[ -n "$CHROME_PATH" ]] && echo "Environment=CHROME=$CHROME_PATH" )
 WorkingDirectory=$INSTALL_DIR
 ExecStart=$INSTALL_DIR/qr_service
 Restart=always

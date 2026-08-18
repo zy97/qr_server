@@ -17,10 +17,16 @@ qr_service ──渲染 PNG，沿同一条 WS 返回──▶ print-agent ──
 
 ### 打印工位（Windows，print-agent）
 
-管理员 PowerShell 执行：
+管理员 PowerShell 执行，直接请求已部署的 qr_service。安装脚本会根据该请求地址自动配置对应的 WebSocket 服务地址：
 
 ```powershell
-irm https://raw.githubusercontent.com/zy97/qr_server/master/scripts/install-print-agent.ps1 | iex
+irm http://<服务器IP>:9095/install-print-agent.ps1 | iex
+```
+
+例如：
+
+```powershell
+irm http://192.168.1.10:9095/install-print-agent.ps1 | iex
 ```
 
 脚本会：下载最新 Release → 解压到 `C:\print-agent` → 首次写入 `print-agent.toml` → 注册开机自启的 Windows 服务（崩溃自动重启）→ 启动服务 → 防火墙放行端口 → 健康检查。> 提示：脚本含中文提示信息，推荐直接用上面的 `irm | iex` 一行命令（Windows PowerShell 5.1 和 PowerShell 7 都可以）；
@@ -38,10 +44,11 @@ irm https://raw.githubusercontent.com/zy97/qr_server/master/scripts/install-prin
 | `-PrinterName` | `ZDesigner ZT231-300dpi ZPL` | 首次安装写入配置的打印机名 |
 | `-Port` | `9195` | HTTP 监听端口 |
 | `-InstallDir` | `C:\print-agent` | 安装目录 |
+| `-ServerUrl` | 空 | qr_service WebSocket 地址；通过服务器安装端点执行时自动传入 |
 
-重复执行即升级：会先停服务、替换程序、再启动；已有 `print-agent.toml` 不会被覆盖。
+重复执行即升级：会先停服务、替换程序、再启动。通过服务器安装端点执行时，仅自动写入或更新 `print-agent.toml` 的 `[server] url`，保留现场打印机和其他配置。
 
-安装后编辑 `C:\print-agent\print-agent.toml` 把 `[server] url` 指向 qr_service（如 `ws://192.168.1.10:9095/ws/agent`，也可安装时用 `-ServerUrl` 指定），重启服务生效：`Restart-Service print-agent`。
+服务器安装端点会根据请求的 Host 和协议自动生成 `[server] url`。HTTP 对应 `ws://`，HTTPS 对应 `wss://`，无需安装后手工修改。仍可在本地运行脚本时通过 `-ServerUrl` 显式指定。
 
 ### 服务器（Linux，qr_service）
 

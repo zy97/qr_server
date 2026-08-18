@@ -1,9 +1,10 @@
+mod agent_installer;
 mod agent_ws;
 mod child_cleanup;
 mod config;
 mod designer;
-mod print_script;
 pub mod err;
+mod print_script;
 #[cfg(feature = "typst")]
 mod requests;
 mod routes;
@@ -40,8 +41,12 @@ async fn main() -> std::io::Result<()> {
             .configure(routes::configure)
             .configure(designer::configure)
             .configure(agent_ws::configure)
+            .configure(agent_installer::configure)
     })
-    .bind((config::CONFIG.server.host.as_str(), config::CONFIG.server.port))?
+    .bind((
+        config::CONFIG.server.host.as_str(),
+        config::CONFIG.server.port,
+    ))?
     .run()
     .await
 }
