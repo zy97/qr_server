@@ -9,6 +9,9 @@ cargo-dist-version = "0.32.0"
 ci = "github"
 # The installers to generate for each app
 installers = ["shell", "powershell"]
+# 每个 artifact 只编译自己需要的包（默认 --workspace 会把 workspace 所有成员都编一遍：
+# 打 print-agent 的 Windows 包时会把 qr_service 和 chromiumoxide 也白编一次）
+precise-builds = true
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
 # Path that installers should place binaries in
