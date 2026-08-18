@@ -95,9 +95,13 @@ rm -rf /tmp/qr_server-src
 mkdir -p /tmp/qr_server-src
 tar -xzf /tmp/qr_server-src.tar.gz -C /tmp/qr_server-src --strip-components=1
 cp -r /tmp/qr_server-src/static "$INSTALL_DIR/"
-# templates 只补种子文件，不覆盖已有数据库
+# templates 只补种子文件，不覆盖已有数据库。
+# 逐文件判断目标是否存在：兼容所有 coreutils/busybox（cp -n 行为不可移植，--update=none 需 coreutils 9.2+）
 mkdir -p "$INSTALL_DIR/templates"
-cp -r --update=none /tmp/qr_server-src/templates/. "$INSTALL_DIR/templates/"
+find /tmp/qr_server-src/templates -type f | while IFS= read -r f; do
+    rel="${f#/tmp/qr_server-src/templates/}"
+    [[ -e "$INSTALL_DIR/templates/$rel" ]] || cp "$f" "$INSTALL_DIR/templates/$rel"
+done
 [[ -f "$INSTALL_DIR/config.toml" ]] || cp /tmp/qr_server-src/config.toml "$INSTALL_DIR/config.toml"
 rm -rf /tmp/qr_server-src /tmp/qr_server-src.tar.gz
 
