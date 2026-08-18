@@ -1,6 +1,6 @@
 [package]
 name = "print-agent"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 description = "标签打印代理：接收 PNG 并发送到本机 Windows 打印机"
 repository = "https://github.com/zy97/qr_server"

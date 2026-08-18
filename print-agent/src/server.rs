@@ -38,8 +38,8 @@ async fn health() -> String {
 }
 
 /// POST /label（工位浏览器调用）：body 为标签数据 JSON 数组。
-/// 完整链路：浏览器 → 本端点 → WS 转发 qr_service 渲染 → 回本机打印 →
-/// 真实打印结果（含队列监听）作为响应返回。成功时响应体为标签 PNG
+/// 链路：浏览器 → 本端点 → WS 转发 qr_service 渲染 → 立即响应标签 PNG，
+/// 打印在后台异步执行，真实结果（含队列监听）经 WS 上报 qr_service
 async fn label_handler(
     Query(query): Query<LabelQuery>,
     Json(labels): Json<serde_json::Value>,
@@ -58,34 +58,28 @@ async fn label_handler(
     let printer = query
         .printer
         .unwrap_or_else(|| CONFIG.print.printer_name.clone());
-    let (png, script) = match crate::ws_client::render(labels, query.template, printer).await {
+    let (job_id, png, script) = match crate::ws_client::render(labels, query.template, printer).await {
         Ok(ok) => ok,
         Err(err) => return (StatusCode::BAD_GATEWAY, format!("渲染失败: {err}")).into_response(),
     };
+    // 渲染成功即响应；打印在后台执行，不阻塞工位浏览器。
+    // 打印结果经 WS 上报 qr_service 日志（同 job_id 对账），本机日志同样记录
     let png_for_print = png.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        crate::print::print_with_script(&script, &png_for_print)
-    })
-    .await;
-    match result {
-        // 成功：返回标签 PNG（与 qr_service /label 的契约一致，浏览器可直接展示）
-        Ok(Ok(())) => (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "image/png")],
-            png,
-        )
-            .into_response(),
-        Ok(Err(err)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("打印失败: {err:#}"),
-        )
-            .into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("打印任务执行异常: {err}"),
-        )
-            .into_response(),
-    }
+    tokio::task::spawn_blocking(move || {
+        let result = crate::print::print_with_script(&script, &png_for_print)
+            .map_err(|err| format!("{err:#}"));
+        match &result {
+            Ok(()) => tracing::info!(job_id, "打印完成"),
+            Err(err) => tracing::warn!(job_id, error = %err, "打印失败"),
+        }
+        crate::ws_client::notify_print_result(&job_id, result);
+    });
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "image/png")],
+        png,
+    )
+        .into_response()
 }
 
 /// 启动 HTTP 服务并阻塞运行，直到 shutdown 完成（服务停止信号或 Ctrl+C）

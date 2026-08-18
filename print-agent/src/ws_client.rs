@@ -77,6 +77,14 @@ async fn run_connection(
     // tokio-tungstenite 0.26 的 connect_async 接受 &str
     let (ws, _) = tokio_tungstenite::connect_async(&url).await?;
     let (mut sink, mut stream) = ws.split();
+    // 接入即上报本机可用打印机列表，服务器代理管理页面据此提供下拉选择
+    let hello = json!({
+        "type": "hello",
+        "station": CONFIG.server.station,
+        "printers": local_printers(),
+    })
+    .to_string();
+    sink.send(Message::Text(hello.into())).await?;
     CONNECTED.store(true, Ordering::Relaxed);
     tracing::info!("已连接 qr_service");
 
@@ -123,6 +131,32 @@ fn local_mac_address() -> Option<String> {
 fn local_mac_address() -> Option<String> {
     None
 }
+
+/// 本机可用打印机名列表（Windows 打印工位）。枚举失败返回空列表，不影响连接
+#[cfg(windows)]
+fn local_printers() -> Vec<String> {
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            // 强制 UTF-8 输出，避免中文打印机名在 GBK 控制台下乱码
+            "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Printer | Select-Object -ExpandProperty Name",
+        ])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[cfg(not(windows))]
+fn local_printers() -> Vec<String> {
+    Vec::new()
+}
 fn route_response(
     text: &str,
     pending: &Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>>,
@@ -152,13 +186,13 @@ fn route_response(
     }
 }
 
-/// 请求 qr_service 渲染标签，返回 PNG 字节。
+/// 请求 qr_service 渲染标签，返回 (job_id, PNG 字节, 打印脚本)。
 /// 渲染超时 30 秒；连接断开/未连接时立即报错
 pub async fn render(
     labels: Vec<serde_json::Value>,
     template: Option<String>,
     printer: String,
-) -> Result<(Vec<u8>, String), String> {
+) -> Result<(String, Vec<u8>, String), String> {
     if !is_connected() {
         return Err(format!(
             "未连接到 qr_service（{}），请检查服务器地址与网络",
@@ -190,7 +224,8 @@ pub async fn render(
         .map_err(|_| "连接任务已停止".to_string())?;
 
     match tokio::time::timeout(Duration::from_secs(30), rx).await {
-        Ok(Ok(result)) => result,
+        Ok(Ok(Ok((png, script)))) => Ok((job_id, png, script)),
+        Ok(Ok(Err(err))) => Err(err),
         Ok(Err(_)) => Err("渲染结果通道已关闭".to_string()),
         Err(_) => {
             CLIENT
@@ -200,5 +235,21 @@ pub async fn render(
                 .remove(&job_id);
             Err("渲染超时（30 秒）".to_string())
         }
+    }
+}
+
+/// 打印结果经 WS 上报 qr_service（异步打印完成后调用）。
+/// 连接断开时只记日志不报错：本地打印已经发生，上报丢失不影响工位
+pub fn notify_print_result(job_id: &str, result: Result<(), String>) {
+    let ok = result.is_ok();
+    let message = json!({
+        "type": "print_result",
+        "job_id": job_id,
+        "ok": ok,
+        "error": result.err(),
+    })
+    .to_string();
+    if CLIENT.outbound.send(message).is_err() {
+        tracing::warn!(job_id, ok, "打印结果上报失败：连接任务已停止");
     }
 }

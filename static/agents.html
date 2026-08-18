@@ -23,6 +23,16 @@
   .actions button:hover { border-color: #4a90d9; color: #4a90d9; }
   .empty, .error { padding: 36px; text-align: center; color: #6b7280; }
   .error { color: #cf1322; }
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; }
+  #modal[hidden] { display: none; }
+  .dialog { background: #fff; border-radius: 6px; padding: 20px 24px; width: 360px; }
+  .dialog h3 { margin: 0 0 14px; font-size: 16px; }
+  .dialog label { display: block; margin: 10px 0 4px; font-size: 13px; color: #4b5563; }
+  .dialog select, .dialog input { width: 100%; padding: 7px 10px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+  .dialog-actions { margin-top: 18px; text-align: right; }
+  .dialog-actions button { padding: 7px 18px; border: 0; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  #m-save { background: #4a90d9; color: #fff; margin-right: 8px; }
+  #m-cancel { background: #f0f0f0; }
 </style>
 </head>
 <body>
@@ -33,6 +43,21 @@
   <span id="summary">正在加载...</span>
 </div>
 <div id="content"><div class="card" id="result"></div></div>
+<div id="modal" hidden>
+  <div class="dialog">
+    <h3 id="m-title"></h3>
+    <label for="m-printer">打印机（不选 = 使用代理本地配置）</label>
+    <select id="m-printer"></select>
+    <label for="m-width">纸张宽度 cm（留空 = 服务器默认）</label>
+    <input id="m-width" type="number" step="0.01" min="0">
+    <label for="m-height">纸张高度 cm（留空 = 服务器默认）</label>
+    <input id="m-height" type="number" step="0.01" min="0">
+    <div class="dialog-actions">
+      <button id="m-save" type="button">保存</button>
+      <button id="m-cancel" type="button">取消</button>
+    </div>
+  </div>
+</div>
 <script>
 function formatDuration(s) {
   const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), r = s % 60, p = [];
@@ -63,25 +88,69 @@ async function api(method, url, body) {
   if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + await resp.text());
 }
 
-async function editSettings(agent) {
-  const printer = prompt('打印机名（留空 = 使用代理本地配置）：', agent.printer_override || '');
-  if (printer === null) return;
-  const width = prompt('纸张宽度 cm（留空 = 服务器默认 ' + '）：', agent.paper_width ?? '');
-  if (width === null) return;
-  const height = prompt('纸张高度 cm（留空 = 服务器默认）：', agent.paper_height ?? '');
-  if (height === null) return;
-  await api('PUT', '/api/agents/' + encodeURIComponent(agent.station) + '/settings', {
-    printer: printer.trim() || null,
-    paper_width: width.trim() ? parseFloat(width) : null,
-    paper_height: height.trim() ? parseFloat(height) : null,
-  });
-  await loadAgents();
+let editing = null;
+
+function openSettings(agent) {
+  editing = agent;
+  document.querySelector('#m-title').textContent = '设置工位「' + agent.station + '」';
+  const select = document.querySelector('#m-printer');
+  select.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = '（使用代理本地配置）';
+  select.appendChild(empty);
+  const printers = agent.printers || [];
+  for (const name of printers) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
+  }
+  if (agent.printer_override && !printers.includes(agent.printer_override)) {
+    const opt = document.createElement('option');
+    opt.value = agent.printer_override;
+    opt.textContent = agent.printer_override + '（不在该代理当前打印机列表中）';
+    select.appendChild(opt);
+  }
+  select.value = agent.printer_override || '';
+  document.querySelector('#m-width').value = agent.paper_width ?? '';
+  document.querySelector('#m-height').value = agent.paper_height ?? '';
+  document.querySelector('#modal').hidden = false;
 }
+
+function closeSettings() {
+  editing = null;
+  document.querySelector('#modal').hidden = true;
+}
+
+document.querySelector('#m-cancel').addEventListener('click', closeSettings);
+document.querySelector('#m-save').addEventListener('click', async () => {
+  if (!editing) return;
+  const station = editing.station;
+  const printer = document.querySelector('#m-printer').value;
+  const width = document.querySelector('#m-width').value.trim();
+  const height = document.querySelector('#m-height').value.trim();
+  try {
+    await api('PUT', '/api/agents/' + encodeURIComponent(station) + '/settings', {
+      printer: printer || null,
+      paper_width: width ? parseFloat(width) : null,
+      paper_height: height ? parseFloat(height) : null,
+    });
+    closeSettings();
+    await loadAgents();
+  } catch (e) {
+    alert('保存失败: ' + e.message);
+  }
+});
 
 async function clearSettings(agent) {
   if (!confirm('清除工位「' + agent.station + '」的打印设置覆盖？')) return;
-  await api('DELETE', '/api/agents/' + encodeURIComponent(agent.station) + '/settings');
-  await loadAgents();
+  try {
+    await api('DELETE', '/api/agents/' + encodeURIComponent(agent.station) + '/settings');
+    await loadAgents();
+  } catch (e) {
+    alert('清除失败: ' + e.message);
+  }
 }
 
 async function loadAgents() {
@@ -120,12 +189,12 @@ async function loadAgents() {
       actions.className = 'actions';
       const btnEdit = document.createElement('button');
       btnEdit.textContent = '设置';
-      btnEdit.onclick = () => editSettings(agent).catch(e => alert('设置失败: ' + e.message));
+      btnEdit.onclick = () => openSettings(agent);
       actions.appendChild(btnEdit);
       if (hasOverride) {
         const btnClear = document.createElement('button');
         btnClear.textContent = '清除';
-        btnClear.onclick = () => clearSettings(agent).catch(e => alert('清除失败: ' + e.message));
+        btnClear.onclick = () => clearSettings(agent);
         actions.appendChild(btnClear);
       }
       row.appendChild(actions);

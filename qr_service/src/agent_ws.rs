@@ -28,6 +28,16 @@ enum AgentMessage {
         /// 生效的打印机名（agent 侧配置或请求覆盖）；空则打印到系统默认打印机
         printer: Option<String>,
     },
+    /// 接入后上报的本机信息（可用打印机列表等）
+    #[serde(rename = "hello")]
+    Hello { printers: Vec<String> },
+    /// agent 异步打印完成后上报的结果（/label 已在渲染后即响应，不等打印）
+    #[serde(rename = "print_result")]
+    PrintResult {
+        job_id: String,
+        ok: bool,
+        error: Option<String>,
+    },
 }
 
 /// 渲染成功：除 PNG 外一并下发打印脚本（打印逻辑集中在服务器维护，见 print_script）。
@@ -63,6 +73,8 @@ struct AgentConnection {
     ip: String,
     /// 客户端自报的 MAC 地址；旧版本客户端不带该参数则为空
     mac: Option<String>,
+    /// 客户端接入时上报的本机可用打印机列表；旧版本客户端不上报则为空
+    printers: Vec<String>,
 }
 
 /// 在线工位注册表：station → 连接信息。
@@ -91,8 +103,19 @@ fn registry_add(station: &str, conn_id: u64, ip: String, mac: Option<String>) {
                 connected_at: Instant::now(),
                 ip,
                 mac,
+                printers: Vec::new(),
             },
         );
+}
+
+/// 更新连接上报的打印机列表（带 conn_id 比对，同工位重连时旧连接的消息不能覆盖新连接）
+fn registry_set_printers(station: &str, conn_id: u64, printers: Vec<String>) {
+    let mut registry = REGISTRY.lock().expect("registry poisoned");
+    if let Some(agent) = registry.agents.get_mut(station) {
+        if agent.conn_id == conn_id {
+            agent.printers = printers;
+        }
+    }
 }
 
 fn registry_remove(station: &str, conn_id: u64) {
@@ -102,7 +125,7 @@ fn registry_remove(station: &str, conn_id: u64) {
     }
 }
 
-async fn handle_agent_message(text: &str, station: &str) -> Option<String> {
+async fn handle_agent_message(text: &str, station: &str, conn_id: u64) -> Option<String> {
     let message: AgentMessage = match serde_json::from_str(text) {
         Ok(m) => m,
         Err(err) => {
@@ -111,6 +134,18 @@ async fn handle_agent_message(text: &str, station: &str) -> Option<String> {
         }
     };
     match message {
+        AgentMessage::Hello { printers } => {
+            registry_set_printers(station, conn_id, printers);
+            None
+        }
+        AgentMessage::PrintResult { job_id, ok, error } => {
+            if ok {
+                tracing::info!(station, job_id, "打印完成");
+            } else {
+                tracing::warn!(station, job_id, error, "打印失败");
+            }
+            None
+        }
         AgentMessage::Render {
             job_id,
             template,
@@ -177,7 +212,7 @@ async fn agent_ws(
         while let Some(Ok(message)) = stream.recv().await {
             match message {
                 AggregatedMessage::Text(text) => {
-                    if let Some(reply) = handle_agent_message(&text, &station).await {
+                    if let Some(reply) = handle_agent_message(&text, &station, conn_id).await {
                         if session.text(reply).await.is_err() {
                             break;
                         }
@@ -211,6 +246,7 @@ async fn list_agents() -> HttpResponse {
                     station.clone(),
                     agent.ip.clone(),
                     agent.mac.clone(),
+                    agent.printers.clone(),
                     agent.connected_at.elapsed().as_secs(),
                 )
             })
@@ -218,13 +254,14 @@ async fn list_agents() -> HttpResponse {
     };
     let agents: Vec<_> = snapshot
         .into_iter()
-        .map(|(station, ip, mac, secs)| {
+        .map(|(station, ip, mac, printers, secs)| {
             let settings = agent_settings(&station).unwrap_or_default();
             serde_json::json!({
                 "station": station,
                 "ip": ip,
                 "mac": mac,
                 "connected_secs": secs,
+                "printers": printers,
                 "printer_override": settings.printer,
                 "paper_width": settings.paper_width,
                 "paper_height": settings.paper_height,
@@ -300,9 +337,45 @@ mod tests {
                 assert_eq!(labels.len(), 1);
                 assert_eq!(printer.as_deref(), Some("P1"));
             }
+            _ => panic!("expected render"),
         }
     }
 
+    #[test]
+    fn parses_hello_and_updates_registry_printers() {
+        let message: AgentMessage =
+            serde_json::from_str(r#"{"type":"hello","printers":["ZDesigner ZT231","HP M403"]}"#)
+                .unwrap();
+        match message {
+            AgentMessage::Hello { printers } => {
+                assert_eq!(printers, vec!["ZDesigner ZT231", "HP M403"]);
+            }
+            _ => panic!("expected hello"),
+        }
+        registry_add("STATION-C", 9, "10.0.0.3".to_string(), None);
+        registry_set_printers("STATION-C", 8, vec!["STALE".to_string()]); // 旧连接不能覆盖
+        registry_set_printers("STATION-C", 9, vec!["P1".to_string(), "P2".to_string()]);
+        assert_eq!(
+            REGISTRY.lock().unwrap().agents["STATION-C"].printers,
+            vec!["P1", "P2"]
+        );
+        registry_remove("STATION-C", 9);
+    }
+    #[test]
+    fn parses_print_result() {
+        let message: AgentMessage = serde_json::from_str(
+            r#"{"type":"print_result","job_id":"1-7","ok":false,"error":"打印机脱机"}"#,
+        )
+        .unwrap();
+        match message {
+            AgentMessage::PrintResult { job_id, ok, error } => {
+                assert_eq!(job_id, "1-7");
+                assert!(!ok);
+                assert_eq!(error.as_deref(), Some("打印机脱机"));
+            }
+            _ => panic!("expected print_result"),
+        }
+    }
     #[test]
     fn render_ok_carries_base64_png() {
         let text = render_ok("1-7", b"png-bytes", Some("ZDesigner ZT231-300dpi ZPL"), &store::AgentSettings::default());
