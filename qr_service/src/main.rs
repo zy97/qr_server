@@ -30,6 +30,7 @@ async fn main() -> std::io::Result<()> {
         .finish()
         .with(file_layer);
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "qr_service 启动");
 
     HttpServer::new(|| {
         App::new()

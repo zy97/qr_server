@@ -28,6 +28,7 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
 
 fn main() {
     let _guard = init_logging();
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "print-agent 启动");
     match std::env::args().nth(1).as_deref() {
         Some("install") => service_install(),
         Some("uninstall") => service_uninstall(),
