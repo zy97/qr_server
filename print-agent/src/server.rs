@@ -40,10 +40,19 @@ async fn health() -> String {
 /// POST /label（工位浏览器调用）：body 为标签数据 JSON 数组。
 /// 完整链路：浏览器 → 本端点 → WS 转发 qr_service 渲染 → 回本机打印 →
 /// 真实打印结果（含队列监听）作为响应返回。成功时响应体为标签 PNG
-async fn label_handler(Query(query): Query<LabelQuery>, Json(labels): Json<serde_json::Value>) -> Response {
+async fn label_handler(
+    Query(query): Query<LabelQuery>,
+    Json(labels): Json<serde_json::Value>,
+) -> Response {
     let labels = match labels.as_array() {
         Some(arr) if !arr.is_empty() => arr.clone(),
-        _ => return (StatusCode::BAD_REQUEST, "请求体应为非空标签数据数组".to_string()).into_response(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "请求体应为非空标签数据数组".to_string(),
+            )
+                .into_response()
+        }
     };
     // 打印机名随渲染请求上行，qr_service 把它编进下发的打印脚本
     let printer = query
@@ -54,13 +63,28 @@ async fn label_handler(Query(query): Query<LabelQuery>, Json(labels): Json<serde
         Err(err) => return (StatusCode::BAD_GATEWAY, format!("渲染失败: {err}")).into_response(),
     };
     let png_for_print = png.clone();
-    let result =
-        tokio::task::spawn_blocking(move || crate::print::print_with_script(&script, &png_for_print)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        crate::print::print_with_script(&script, &png_for_print)
+    })
+    .await;
     match result {
         // 成功：返回标签 PNG（与 qr_service /label 的契约一致，浏览器可直接展示）
-        Ok(Ok(())) => (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "image/png")], png).into_response(),
-        Ok(Err(err)) => (StatusCode::INTERNAL_SERVER_ERROR, format!("打印失败: {err:#}")).into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, format!("打印任务执行异常: {err}")).into_response(),
+        Ok(Ok(())) => (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "image/png")],
+            png,
+        )
+            .into_response(),
+        Ok(Err(err)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("打印失败: {err:#}"),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("打印任务执行异常: {err}"),
+        )
+            .into_response(),
     }
 }
 

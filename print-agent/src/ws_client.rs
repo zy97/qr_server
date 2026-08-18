@@ -21,7 +21,7 @@ struct ClientState {
     /// 序列化后的上行消息，由连接任务取走发送
     outbound: mpsc::UnboundedSender<String>,
     /// job_id → 等待渲染结果的通道（成功为 PNG + 服务器下发的打印脚本）
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>>
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>>,
 }
 
 static CLIENT: LazyLock<ClientState> = LazyLock::new(|| {
@@ -72,7 +72,8 @@ async fn run_connection(
     rx: &mut mpsc::UnboundedReceiver<String>,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>>,
 ) -> anyhow::Result<()> {
-    let url = format!("{}?station={}", CONFIG.server.url, CONFIG.server.station);
+    let mac = local_mac_address().unwrap_or_default();
+    let url = format!("{}?station={}&mac={}", CONFIG.server.url, CONFIG.server.station, mac);
     // tokio-tungstenite 0.26 的 connect_async 接受 &str
     let (ws, _) = tokio_tungstenite::connect_async(&url).await?;
     let (mut sink, mut stream) = ws.split();
@@ -101,6 +102,27 @@ async fn run_connection(
     Ok(())
 }
 
+#[cfg(windows)]
+fn local_mac_address() -> Option<String> {
+    let output = std::process::Command::new("getmac")
+        .args(["/fo", "csv", "/nh"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split(',').next())
+        .map(|value| value.trim().trim_matches('"'))
+        .find(|value| value.len() == 17 && *value != "N/A")
+        .map(str::to_string)
+}
+
+#[cfg(not(windows))]
+fn local_mac_address() -> Option<String> {
+    None
+}
 fn route_response(
     text: &str,
     pending: &Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>>,
@@ -112,19 +134,16 @@ fn route_response(
     let job_id = value["job_id"].as_str().unwrap_or("").to_string();
     let result = match value["type"].as_str() {
         Some("render_ok") => {
-            let png = value["png_base64"]
-                .as_str()
-                .and_then(|s| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s).ok());
+            let png = value["png_base64"].as_str().and_then(|s| {
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s).ok()
+            });
             let script = value["print_script"].as_str().map(|s| s.to_string());
             match (png, script) {
                 (Some(png), Some(script)) => Ok((png, script)),
                 _ => Err("渲染结果缺少 png_base64 或 print_script".to_string()),
             }
         }
-        Some("render_err") => Err(value["error"]
-            .as_str()
-            .unwrap_or("渲染失败")
-            .to_string()),
+        Some("render_err") => Err(value["error"].as_str().unwrap_or("渲染失败").to_string()),
         _ => return,
     };
     let tx = pending.lock().expect("pending poisoned").remove(&job_id);
@@ -146,7 +165,11 @@ pub async fn render(
             CONFIG.server.url
         ));
     }
-    let job_id = format!("{}-{}", std::process::id(), NEXT_JOB.fetch_add(1, Ordering::Relaxed));
+    let job_id = format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT_JOB.fetch_add(1, Ordering::Relaxed)
+    );
     let (tx, rx) = oneshot::channel();
     CLIENT
         .pending
@@ -170,7 +193,11 @@ pub async fn render(
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("渲染结果通道已关闭".to_string()),
         Err(_) => {
-            CLIENT.pending.lock().expect("pending poisoned").remove(&job_id);
+            CLIENT
+                .pending
+                .lock()
+                .expect("pending poisoned")
+                .remove(&job_id);
             Err("渲染超时（30 秒）".to_string())
         }
     }

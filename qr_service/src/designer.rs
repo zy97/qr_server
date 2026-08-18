@@ -18,6 +18,7 @@ const STATIC_DIR: &str = "static";
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(designer_page)
         .service(manager_page)
+        .service(agents_page)
         .service(designer_asset)
         .service(list_templates)
         .service(create_template)
@@ -40,6 +41,11 @@ async fn manager_page() -> Result<impl Responder, CustomError> {
     serve_static_page("manager.html")
 }
 
+/// 打印代理在线管理页面
+#[get("/agents")]
+async fn agents_page() -> Result<impl Responder, CustomError> {
+    serve_static_page("agents.html")
+}
 fn serve_static_page(name: &str) -> Result<HttpResponse, CustomError> {
     let html = fs::read_to_string(Path::new(STATIC_DIR).join(name))?;
     Ok(HttpResponse::Ok()

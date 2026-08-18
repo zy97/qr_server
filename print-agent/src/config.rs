@@ -52,7 +52,6 @@ fn default_printer_name() -> String {
     "ZDesigner ZT231-300dpi ZPL".to_string()
 }
 
-
 #[derive(Deserialize)]
 pub struct PrintConfig {
     /// 目标打印机名（Windows 打印机列表中的名称）；请求可用 ?printer= 覆盖。
@@ -112,17 +111,14 @@ mod tests {
         assert_eq!(config.server.port, 9195);
         assert!(config.server.url.is_empty());
         assert_eq!(config.print.printer_name, "ZDesigner ZT231-300dpi ZPL");
-
     }
 
     #[test]
     fn parses_full_config() {
-        let config: Config = toml::from_str(
-            "[server]\nport = 8080\n[print]\nprinter_name = \"Test Printer\"\n",
-        )
-        .unwrap();
+        let config: Config =
+            toml::from_str("[server]\nport = 8080\n[print]\nprinter_name = \"Test Printer\"\n")
+                .unwrap();
         assert_eq!(config.server.port, 8080);
         assert_eq!(config.print.printer_name, "Test Printer");
-
     }
 }

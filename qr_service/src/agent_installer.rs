@@ -15,7 +15,7 @@ fn websocket_url(request: &HttpRequest) -> String {
 
 fn installer_script(server_url: &str) -> String {
     format!(
-        "$script = Invoke-RestMethod '{}'; & (:Create($script)) -ServerUrl '{}'\r\n",
+        "$script = Invoke-RestMethod '{}'; & ([scriptblock]::Create($script)) -ServerUrl '{}'\r\n",
         INSTALL_SCRIPT_URL,
         server_url.replace('\'', "''")
     )
@@ -48,8 +48,9 @@ mod tests {
             .to_http_request();
 
         assert_eq!(websocket_url(&request), "ws://192.168.1.10:9095/ws/agent");
-        assert!(installer_script(&websocket_url(&request))
-            .contains("-ServerUrl 'ws://192.168.1.10:9095/ws/agent'"));
+        assert!(installer_script(&websocket_url(&request)).contains(
+            "& ([scriptblock]::Create($script)) -ServerUrl 'ws://192.168.1.10:9095/ws/agent'"
+        ));
     }
 
     #[actix_web::test]

@@ -540,12 +540,11 @@ mod tests {
         )
         .expect("build context");
 
-        let rendered = templates_from_html(
-            &std::fs::read_to_string(TEMPLATE_HTML).expect("read template"),
-        )
-        .expect("build templates")
-        .render("template.html", &context)
-        .expect("chrome template should render with chrome template data");
+        let rendered =
+            templates_from_html(&std::fs::read_to_string(TEMPLATE_HTML).expect("read template"))
+                .expect("build templates")
+                .render("template.html", &context)
+                .expect("chrome template should render with chrome template data");
 
         // 与 main.typ 一致的动态字段都应渲染出来
         assert!(rendered.contains("P-001"));
@@ -564,12 +563,11 @@ mod tests {
             &std::fs::read_to_string(TEMPLATE_HTML).expect("read template"),
         )
         .expect("build context");
-        let rendered = templates_from_html(
-            &std::fs::read_to_string(TEMPLATE_HTML).expect("read template"),
-        )
-        .expect("build templates")
-        .render("template.html", &context)
-        .expect("chrome template should render");
+        let rendered =
+            templates_from_html(&std::fs::read_to_string(TEMPLATE_HTML).expect("read template"))
+                .expect("build templates")
+                .render("template.html", &context)
+                .expect("chrome template should render");
 
         assert!(!rendered.contains("../logo.png"));
         assert!(!rendered.contains("./qr.png"));

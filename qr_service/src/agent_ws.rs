@@ -49,10 +49,20 @@ fn render_err(job_id: &str, error: &str) -> String {
     .to_string()
 }
 
-/// 在线工位注册表：station → (连接 id, 接入时间)。
+/// 在线工位连接信息
+struct AgentConnection {
+    conn_id: u64,
+    connected_at: Instant,
+    /// 服务器观察到的对端 IP（WebSocket 对端地址）
+    ip: String,
+    /// 客户端自报的 MAC 地址；旧版本客户端不带该参数则为空
+    mac: Option<String>,
+}
+
+/// 在线工位注册表：station → 连接信息。
 /// 同一工位重连时旧连接的清理不能误删新连接，所以带上连接 id 比对
 struct Registry {
-    agents: HashMap<String, (u64, Instant)>,
+    agents: HashMap<String, AgentConnection>,
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| {
@@ -63,17 +73,25 @@ static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| {
 
 static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
 
-fn registry_add(station: &str, conn_id: u64) {
+fn registry_add(station: &str, conn_id: u64, ip: String, mac: Option<String>) {
     REGISTRY
         .lock()
         .expect("registry poisoned")
         .agents
-        .insert(station.to_string(), (conn_id, Instant::now()));
+        .insert(
+            station.to_string(),
+            AgentConnection {
+                conn_id,
+                connected_at: Instant::now(),
+                ip,
+                mac,
+            },
+        );
 }
 
 fn registry_remove(station: &str, conn_id: u64) {
     let mut registry = REGISTRY.lock().expect("registry poisoned");
-    if matches!(registry.agents.get(station), Some((id, _)) if *id == conn_id) {
+    if matches!(registry.agents.get(station), Some(agent) if agent.conn_id == conn_id) {
         registry.agents.remove(station);
     }
 }
@@ -102,6 +120,7 @@ async fn handle_agent_message(text: &str) -> Option<String> {
 #[derive(Deserialize)]
 struct AgentConnQuery {
     station: Option<String>,
+    mac: Option<String>,
 }
 
 #[get("/ws/agent")]
@@ -116,14 +135,21 @@ async fn agent_ws(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "unknown".to_string());
     let conn_id = NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed);
+    let ip = req
+        .peer_addr()
+        .map(|address| address.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let mac = query.mac.clone().filter(|value| !value.is_empty());
 
     let (response, mut session, stream) = actix_ws::handle(&req, stream)
         .map_err(|err| CustomError::OtherLibraryError(format!("ws 握手失败: {err}")))?;
     // PNG 的 base64 可能达到数百 KB，放宽聚合消息大小上限
-    let mut stream = stream.aggregate_continuations().max_continuation_size(8 * 1024 * 1024);
+    let mut stream = stream
+        .aggregate_continuations()
+        .max_continuation_size(8 * 1024 * 1024);
 
-    registry_add(&station, conn_id);
-    tracing::info!(station, conn_id, "print-agent 已接入");
+    registry_add(&station, conn_id, ip.clone(), mac.clone());
+    tracing::info!(station, conn_id, ip, mac, "print-agent 已接入");
 
     actix_web::rt::spawn(async move {
         while let Some(Ok(message)) = stream.recv().await {
@@ -156,10 +182,12 @@ async fn list_agents() -> HttpResponse {
     let agents: Vec<_> = registry
         .agents
         .iter()
-        .map(|(station, (_, since))| {
+        .map(|(station, agent)| {
             serde_json::json!({
                 "station": station,
-                "connected_secs": since.elapsed().as_secs(),
+                "ip": agent.ip,
+                "mac": agent.mac,
+                "connected_secs": agent.connected_at.elapsed().as_secs(),
             })
         })
         .collect();
@@ -201,7 +229,10 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value["type"], "render_ok");
         assert_eq!(value["job_id"], "1-7");
-        assert!(value["print_script"].as_str().unwrap().contains("Get-PrintJob"));
+        assert!(value["print_script"]
+            .as_str()
+            .unwrap()
+            .contains("Get-PrintJob"));
         assert_eq!(
             general_purpose::STANDARD
                 .decode(value["png_base64"].as_str().unwrap())
@@ -220,11 +251,21 @@ mod tests {
 
     #[test]
     fn registry_remove_only_matching_connection() {
-        registry_add("STATION-A", 1);
-        registry_add("STATION-A", 2); // 同工位重连，新连接覆盖
-        registry_remove("STATION-A", 1); // 旧连接断开，不应误删
-        assert!(REGISTRY.lock().unwrap().agents.contains_key("STATION-A"));
-        registry_remove("STATION-A", 2);
-        assert!(!REGISTRY.lock().unwrap().agents.contains_key("STATION-A"));
+        registry_add("STATION-B", 1, "10.0.0.1".to_string(), None);
+        registry_add(
+            "STATION-B",
+            2,
+            "10.0.0.2".to_string(),
+            Some("00-11-22-33-44-55".to_string()),
+        ); // 同工位重连，新连接覆盖
+        registry_remove("STATION-B", 1); // 旧连接断开，不应误删
+        {
+            let registry = REGISTRY.lock().unwrap();
+            let agent = registry.agents.get("STATION-B").unwrap();
+            assert_eq!(agent.ip, "10.0.0.2");
+            assert_eq!(agent.mac.as_deref(), Some("00-11-22-33-44-55"));
+        }
+        registry_remove("STATION-B", 2);
+        assert!(!REGISTRY.lock().unwrap().agents.contains_key("STATION-B"));
     }
 }

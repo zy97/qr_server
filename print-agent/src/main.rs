@@ -1,9 +1,9 @@
 mod config;
 mod print;
 mod server;
-mod ws_client;
 #[cfg(windows)]
 mod win_service;
+mod ws_client;
 
 use std::process::Command;
 
@@ -104,7 +104,10 @@ fn service_install() {
 #[cfg(windows)]
 fn service_uninstall() {
     let _ = Command::new("sc.exe").args(["stop", SERVICE_NAME]).status();
-    match Command::new("sc.exe").args(["delete", SERVICE_NAME]).status() {
+    match Command::new("sc.exe")
+        .args(["delete", SERVICE_NAME])
+        .status()
+    {
         Ok(status) if status.success() => println!("服务已卸载"),
         Ok(status) => eprintln!("卸载失败（退出码 {status}），请用管理员权限运行"),
         Err(err) => eprintln!("卸载失败: {err}"),

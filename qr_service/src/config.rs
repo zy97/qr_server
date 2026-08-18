@@ -7,7 +7,8 @@ use tracing::warn;
 #[derive(Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
-    pub server: ServerConfig,    #[serde(default)]
+    pub server: ServerConfig,
+    #[serde(default)]
     pub print: PrintConfig,
     #[serde(default)]
     pub template: TemplateConfig,
@@ -89,7 +90,6 @@ impl Default for TemplateConfig {
     }
 }
 
-
 pub static CONFIG: LazyLock<Config> =
     LazyLock::new(|| match std::fs::read_to_string("config.toml") {
         Ok(content) => match toml::from_str(&content) {
@@ -120,7 +120,8 @@ mod tests {
         let config: Config = toml::from_str("").unwrap();
         assert_eq!(config.print.paper_width, 10.57);
         assert_eq!(config.print.paper_height, 29.70);
-        let config: Config = toml::from_str("[print]\npaper_width = 15.0\npaper_height = 10.0").unwrap();
+        let config: Config =
+            toml::from_str("[print]\npaper_width = 15.0\npaper_height = 10.0").unwrap();
         assert_eq!(config.print.paper_width, 15.0);
         assert_eq!(config.print.paper_height, 10.0);
     }
@@ -132,5 +133,4 @@ mod tests {
         let config: Config = toml::from_str("[template]\nsave_html = false").unwrap();
         assert!(!config.template.save_html);
     }
-
 }
