@@ -97,7 +97,7 @@ tar -xzf /tmp/qr_server-src.tar.gz -C /tmp/qr_server-src --strip-components=1
 cp -r /tmp/qr_server-src/static "$INSTALL_DIR/"
 # templates 只补种子文件，不覆盖已有数据库
 mkdir -p "$INSTALL_DIR/templates"
-cp -rn /tmp/qr_server-src/templates/. "$INSTALL_DIR/templates/"
+cp -r --update=none /tmp/qr_server-src/templates/. "$INSTALL_DIR/templates/"
 [[ -f "$INSTALL_DIR/config.toml" ]] || cp /tmp/qr_server-src/config.toml "$INSTALL_DIR/config.toml"
 rm -rf /tmp/qr_server-src /tmp/qr_server-src.tar.gz
 
