@@ -74,14 +74,19 @@ mkdir -p "$INSTALL_DIR"
 echo "==> 下载二进制（GitHub Release）..."
 dl "${GH_PROXY}https://github.com/$REPO/releases/download/$TAG/$ASSET" -o /tmp/qr_service.tar.xz
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-tar -xJf /tmp/qr_service.tar.xz -C "$INSTALL_DIR"
+# dist tar 包内容嵌在一层同名子目录里——解压到暂存目录再无条件替换二进制。
+# 不能在 $INSTALL_DIR 里就地解压 + 仅当目标不存在才归位：升级时旧二进制存在，
+# 新二进制会永远留在嵌套子目录里，服务跑的仍是旧版本
+rm -rf /tmp/qr_service-bin
+mkdir -p /tmp/qr_service-bin
+tar -xJf /tmp/qr_service.tar.xz -C /tmp/qr_service-bin
 rm /tmp/qr_service.tar.xz
-# dist 压缩包可能带一层子目录，把二进制归位
-if [[ ! -x "$INSTALL_DIR/qr_service" ]]; then
-    found=$(find "$INSTALL_DIR" -name qr_service -type f | head -1)
-    [[ -n "$found" ]] && mv "$found" "$INSTALL_DIR/qr_service"
-fi
-chmod +x "$INSTALL_DIR/qr_service"
+found=$(find /tmp/qr_service-bin -name qr_service -type f | head -1)
+[[ -z "$found" ]] && { echo "压缩包里没找到 qr_service 二进制" >&2; exit 1; }
+cp "$found" "$INSTALL_DIR/qr_service.new"
+chmod +x "$INSTALL_DIR/qr_service.new"
+mv "$INSTALL_DIR/qr_service.new" "$INSTALL_DIR/qr_service"
+rm -rf /tmp/qr_service-bin
 
 # 2. 运行时资源（dist 产物只含二进制；static/templates 从同版本源码包取）
 echo "==> 下载运行时资源（static/templates）..."
@@ -136,7 +141,9 @@ fi
 
 sleep 2
 if systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo "安装完成，服务运行中。设计器入口: http://<服务器IP>:9095/designer"
+    echo "安装完成，服务运行中。启动日志（含版本号）："
+    journalctl -u "$SERVICE_NAME" --since "-15s" --no-pager | grep -m1 "qr_service 启动" || true
+    echo "设计器入口: http://<服务器IP>:9095/designer"
     echo "别忘了编辑 $INSTALL_DIR/config.toml 的 [print] agent_url 指向各打印工位"
 else
     echo "服务未能启动，请查看日志: journalctl -u $SERVICE_NAME -e" >&2
