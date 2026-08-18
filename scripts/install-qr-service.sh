@@ -119,12 +119,15 @@ for c in chromium chromium-browser google-chrome google-chrome-stable chrome; do
     fi
 done
 if [[ -z "$CHROME_PATH" ]]; then
-    # agent-browser install 通过 Playwright 下载 Chrome for Testing，浏览器位于 ms-playwright 缓存目录。
-    # 调用者与 systemd 服务可能使用不同 HOME，因此同时检查 root 和普通用户缓存。
+    # agent-browser install 的浏览器缓存根目录因安装方式不同而不同：
+    # ~/.agent-browser/browsers/chrome-<版本>/ 或 Playwright 的 ~/.cache/ms-playwright。
+    # 调用者与 systemd 服务可能不同 HOME，root 和普通用户的常见位置都找一遍（取最新版本）。
     # find 的任一搜索根目录不存在都会返回非 0（错误已被 2>/dev/null 吞掉），
     # 在 set -e + pipefail 下会导致赋值失败、脚本静默退出，必须 || true 兜底
-    CHROME_PATH=$(find "$HOME/.cache/ms-playwright" /root/.cache/ms-playwright /home/*/.cache/ms-playwright \
-        -type f \( -path '*/chrome-linux*/chrome' -o -path '*/chrome-headless-shell-linux*/chrome-headless-shell' \) \
+    CHROME_PATH=$(find "$HOME/.agent-browser/browsers" "$HOME/.cache/ms-playwright" \
+        /root/.agent-browser/browsers /root/.cache/ms-playwright \
+        /home/*/.agent-browser/browsers /home/*/.cache/ms-playwright \
+        -type f \( -name chrome -o -name chrome-headless-shell \) \
         2>/dev/null | sort -V | tail -1) || true
 fi
 if [[ -n "$CHROME_PATH" ]]; then
