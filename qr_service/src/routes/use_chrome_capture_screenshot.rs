@@ -54,6 +54,10 @@ async fn chrome_state() -> Result<&'static ChromeState, CustomError> {
                 .window_size(BROWSER_WINDOW_WIDTH, BROWSER_WINDOW_HEIGHT)
                 .user_data_dir(&user_data_dir)
                 .args([
+                    // 服务器以 root 运行（systemd 默认）时 Chrome 必须关闭 sandbox，
+                    // 否则启动即退出（crbug.com/638180）
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
                     "--disable-gpu",
                     "--force-device-scale-factor=1",
                     "--disable-background-timer-throttling",
