@@ -3,7 +3,8 @@
 //! agent 主动外连，「连接即工位身份」：服务器不需要配置任何工位地址，
 //! 新增工位只需要在工位上装 print-agent 并填服务器地址。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
@@ -35,6 +36,8 @@ enum AgentMessage {
     #[serde(rename = "print_result")]
     PrintResult {
         job_id: String,
+        /// 实际使用的打印机（新版 agent 上报；旧版没有该字段）
+        printer: Option<String>,
         ok: bool,
         error: Option<String>,
     },
@@ -47,10 +50,18 @@ fn render_ok(job_id: &str, png: &[u8], printer: Option<&str>, settings: &store::
         "type": "render_ok",
         "job_id": job_id,
         "png_base64": general_purpose::STANDARD.encode(png),
+        // 生效打印机与来源一并下发，agent 据此记录/上报实际使用的打印机
+        "printer": printer.unwrap_or(""),
+        "printer_source": if settings.printer.is_some() { "server" } else { "agent" },
         "print_script": crate::print_script::build_print_script(
             printer.unwrap_or(""),
-            settings.paper_width,
-            settings.paper_height,
+            &crate::print_script::PrintOverrides {
+                paper_width: settings.paper_width,
+                paper_height: settings.paper_height,
+                margin: settings.margin,
+                y_offset: settings.y_offset,
+                queue_timeout_secs: settings.queue_timeout_secs,
+            },
         ),
     })
     .to_string()
@@ -90,6 +101,46 @@ static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| {
 });
 
 static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
+
+/// 最近的打印结果记录（内存暂存，重启清空；持久对账以服务日志为准）
+struct PrintResultRecord {
+    station: String,
+    job_id: String,
+    printer: Option<String>,
+    ok: bool,
+    error: Option<String>,
+    /// Unix 秒
+    at: i64,
+}
+
+/// 最多暂存的打印结果条数（最新在前）
+const MAX_PRINT_RESULTS: usize = 200;
+
+static PRINT_RESULTS: LazyLock<Mutex<VecDeque<PrintResultRecord>>> =
+    LazyLock::new(|| Mutex::new(VecDeque::new()));
+
+fn record_print_result(
+    station: &str,
+    job_id: &str,
+    printer: Option<String>,
+    ok: bool,
+    error: Option<String>,
+) {
+    let at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or_default();
+    let mut results = PRINT_RESULTS.lock().expect("print results poisoned");
+    results.push_front(PrintResultRecord {
+        station: station.to_string(),
+        job_id: job_id.to_string(),
+        printer,
+        ok,
+        error,
+        at,
+    });
+    results.truncate(MAX_PRINT_RESULTS);
+}
 
 fn registry_add(station: &str, conn_id: u64, ip: String, mac: Option<String>) {
     REGISTRY
@@ -138,12 +189,18 @@ async fn handle_agent_message(text: &str, station: &str, conn_id: u64) -> Option
             registry_set_printers(station, conn_id, printers);
             None
         }
-        AgentMessage::PrintResult { job_id, ok, error } => {
+        AgentMessage::PrintResult {
+            job_id,
+            printer,
+            ok,
+            error,
+        } => {
             if ok {
-                tracing::info!(station, job_id, "打印完成");
+                tracing::info!(station, job_id, printer, "打印完成");
             } else {
-                tracing::warn!(station, job_id, error, "打印失败");
+                tracing::warn!(station, job_id, printer, error, "打印失败");
             }
+            record_print_result(station, &job_id, printer, ok, error);
             None
         }
         AgentMessage::Render {
@@ -265,6 +322,9 @@ async fn list_agents() -> HttpResponse {
                 "printer_override": settings.printer,
                 "paper_width": settings.paper_width,
                 "paper_height": settings.paper_height,
+                "margin": settings.margin,
+                "y_offset": settings.y_offset,
+                "queue_timeout_secs": settings.queue_timeout_secs,
             })
         })
         .collect();
@@ -278,6 +338,12 @@ struct SetAgentSettingsRequest {
     paper_width: Option<f64>,
     /// 自定义纸张高度（cm）
     paper_height: Option<f64>,
+    /// 打印横向边距（1/100 英寸）
+    margin: Option<i32>,
+    /// 打印垂直偏移（1/100 英寸）
+    y_offset: Option<i32>,
+    /// 打印队列监听超时（秒）
+    queue_timeout_secs: Option<i32>,
 }
 
 /// 设置/更新工位打印设置覆盖；空打印机名视为不覆盖打印机
@@ -296,6 +362,9 @@ async fn set_agent_settings(
             .map(str::to_string),
         paper_width: body.paper_width,
         paper_height: body.paper_height,
+        margin: body.margin,
+        y_offset: body.y_offset,
+        queue_timeout_secs: body.queue_timeout_secs,
     };
     store::with_db(|conn| store::set_agent_settings(conn, &station, &settings))?;
     Ok(HttpResponse::Ok().finish())
@@ -308,9 +377,30 @@ async fn clear_agent_settings(path: web::Path<String>) -> Result<HttpResponse, C
     Ok(HttpResponse::Ok().finish())
 }
 
+/// 最近的打印结果（最新在前，代理管理页面展示用）
+#[get("/api/print-results")]
+async fn list_print_results() -> HttpResponse {
+    let results = PRINT_RESULTS.lock().expect("print results poisoned");
+    let records: Vec<_> = results
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "station": r.station,
+                "job_id": r.job_id,
+                "printer": r.printer,
+                "ok": r.ok,
+                "error": r.error,
+                "at": r.at,
+            })
+        })
+        .collect();
+    HttpResponse::Ok().json(records)
+}
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(agent_ws)
         .service(list_agents)
+        .service(list_print_results)
         .service(set_agent_settings)
         .service(clear_agent_settings);
 }
@@ -342,6 +432,27 @@ mod tests {
     }
 
     #[test]
+    fn print_results_recorded_newest_first_with_cap() {
+        record_print_result("STATION-D", "j-1", None, true, None);
+        record_print_result(
+            "STATION-D",
+            "j-2",
+            Some("P1".to_string()),
+            false,
+            Some("脱机".to_string()),
+        );
+        let results = PRINT_RESULTS.lock().unwrap();
+        let first = results
+            .iter()
+            .find(|r| r.station == "STATION-D" && r.job_id == "j-2")
+            .expect("latest record");
+        assert!(!first.ok);
+        assert_eq!(first.error.as_deref(), Some("脱机"));
+        assert_eq!(first.printer.as_deref(), Some("P1"));
+        assert!(results.len() <= MAX_PRINT_RESULTS);
+        drop(results);
+    }
+    #[test]
     fn parses_hello_and_updates_registry_printers() {
         let message: AgentMessage =
             serde_json::from_str(r#"{"type":"hello","printers":["ZDesigner ZT231","HP M403"]}"#)
@@ -368,10 +479,16 @@ mod tests {
         )
         .unwrap();
         match message {
-            AgentMessage::PrintResult { job_id, ok, error } => {
+            AgentMessage::PrintResult {
+                job_id,
+                printer,
+                ok,
+                error,
+            } => {
                 assert_eq!(job_id, "1-7");
                 assert!(!ok);
                 assert_eq!(error.as_deref(), Some("打印机脱机"));
+                assert_eq!(printer, None); // 旧版 agent 不带 printer 字段
             }
             _ => panic!("expected print_result"),
         }
@@ -382,6 +499,8 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value["type"], "render_ok");
         assert_eq!(value["job_id"], "1-7");
+        assert_eq!(value["printer"], "ZDesigner ZT231-300dpi ZPL");
+        assert_eq!(value["printer_source"], "agent");
         assert!(value["print_script"]
             .as_str()
             .unwrap()

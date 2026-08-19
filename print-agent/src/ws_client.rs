@@ -17,16 +17,27 @@ use crate::config::CONFIG;
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 static CONNECTED: AtomicBool = AtomicBool::new(false);
 
+/// qr_service 渲染成功下发的内容
+pub struct RenderOutcome {
+    pub png: Vec<u8>,
+    /// 服务器生成的打印脚本（纸张/打印机已按工位设置编入）
+    pub script: String,
+    /// 实际生效的打印机名（空 = 打印脚本运行时取系统默认打印机）
+    pub printer: String,
+    /// 打印机来源：server=服务器工位设置覆盖，agent=代理本地配置/请求参数
+    pub printer_source: String,
+}
+
 struct ClientState {
     /// 序列化后的上行消息，由连接任务取走发送
     outbound: mpsc::UnboundedSender<String>,
     /// job_id → 等待渲染结果的通道（成功为 PNG + 服务器下发的打印脚本）
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>>,
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<RenderOutcome, String>>>>>,
 }
 
 static CLIENT: LazyLock<ClientState> = LazyLock::new(|| {
     let (outbound, mut rx) = mpsc::unbounded_channel::<String>();
-    let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>> =
+    let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<RenderOutcome, String>>>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     // 连接监督任务：需要先把 rx 挪进独立任务，等 server::run 的 runtime 起来后由 start() 触发
@@ -50,7 +61,7 @@ static CLIENT: LazyLock<ClientState> = LazyLock::new(|| {
 });
 
 fn fail_all_pending(
-    pending: &Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>>,
+    pending: &Arc<Mutex<HashMap<String, oneshot::Sender<Result<RenderOutcome, String>>>>>,
     reason: &str,
 ) {
     let mut pending = pending.lock().expect("pending poisoned");
@@ -70,7 +81,7 @@ pub fn is_connected() -> bool {
 
 async fn run_connection(
     rx: &mut mpsc::UnboundedReceiver<String>,
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>>,
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<RenderOutcome, String>>>>>,
 ) -> anyhow::Result<()> {
     let mac = local_mac_address().unwrap_or_default();
     let url = format!("{}?station={}&mac={}", CONFIG.server.url, CONFIG.server.station, mac);
@@ -78,18 +89,40 @@ async fn run_connection(
     let (ws, _) = tokio_tungstenite::connect_async(&url).await?;
     let (mut sink, mut stream) = ws.split();
     // 接入即上报本机可用打印机列表，服务器代理管理页面据此提供下拉选择
+    let mut known_printers = local_printers();
     let hello = json!({
         "type": "hello",
         "station": CONFIG.server.station,
-        "printers": local_printers(),
+        "printers": known_printers,
     })
     .to_string();
     sink.send(Message::Text(hello.into())).await?;
     CONNECTED.store(true, Ordering::Relaxed);
     tracing::info!("已连接 qr_service");
+    // 连接存续期间定时刷新打印机列表：工位新增/删除打印机无需重启服务。
+    // 每次刷新要起一个 powershell 进程跑 Get-Printer，10s 兼顾响应速度与进程开销；
+    // 有变化才重新上报，避免给服务器刷无效消息
+    let mut refresh = tokio::time::interval(Duration::from_secs(10));
+    refresh.tick().await; // 跳过首次立即触发（刚在接入时上报过）
 
     loop {
         tokio::select! {
+            _ = refresh.tick() => {
+                let printers = tokio::task::spawn_blocking(local_printers)
+                    .await
+                    .unwrap_or_default();
+                if printers != known_printers {
+                    known_printers = printers.clone();
+                    let hello = json!({
+                        "type": "hello",
+                        "station": CONFIG.server.station,
+                        "printers": printers,
+                    })
+                    .to_string();
+                    if sink.send(Message::Text(hello.into())).await.is_err() { break; }
+                    tracing::info!(count = known_printers.len(), "打印机列表已更新并重新上报");
+                }
+            }
             incoming = stream.next() => match incoming {
                 Some(Ok(Message::Text(text))) => route_response(&text, &pending),
                 Some(Ok(Message::Ping(bytes))) => {
@@ -159,7 +192,7 @@ fn local_printers() -> Vec<String> {
 }
 fn route_response(
     text: &str,
-    pending: &Arc<Mutex<HashMap<String, oneshot::Sender<Result<(Vec<u8>, String), String>>>>>,
+    pending: &Arc<Mutex<HashMap<String, oneshot::Sender<Result<RenderOutcome, String>>>>>,
 ) {
     let value: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
@@ -173,7 +206,12 @@ fn route_response(
             });
             let script = value["print_script"].as_str().map(|s| s.to_string());
             match (png, script) {
-                (Some(png), Some(script)) => Ok((png, script)),
+                (Some(png), Some(script)) => Ok(RenderOutcome {
+                    png,
+                    script,
+                    printer: value["printer"].as_str().unwrap_or("").to_string(),
+                    printer_source: value["printer_source"].as_str().unwrap_or("agent").to_string(),
+                }),
                 _ => Err("渲染结果缺少 png_base64 或 print_script".to_string()),
             }
         }
@@ -186,13 +224,13 @@ fn route_response(
     }
 }
 
-/// 请求 qr_service 渲染标签，返回 (job_id, PNG 字节, 打印脚本)。
+/// 请求 qr_service 渲染标签，返回 (job_id, 渲染结果)。
 /// 渲染超时 30 秒；连接断开/未连接时立即报错
 pub async fn render(
     labels: Vec<serde_json::Value>,
     template: Option<String>,
     printer: String,
-) -> Result<(String, Vec<u8>, String), String> {
+) -> Result<(String, RenderOutcome), String> {
     if !is_connected() {
         return Err(format!(
             "未连接到 qr_service（{}），请检查服务器地址与网络",
@@ -224,7 +262,7 @@ pub async fn render(
         .map_err(|_| "连接任务已停止".to_string())?;
 
     match tokio::time::timeout(Duration::from_secs(30), rx).await {
-        Ok(Ok(Ok((png, script)))) => Ok((job_id, png, script)),
+        Ok(Ok(Ok(outcome))) => Ok((job_id, outcome)),
         Ok(Ok(Err(err))) => Err(err),
         Ok(Err(_)) => Err("渲染结果通道已关闭".to_string()),
         Err(_) => {
@@ -240,11 +278,12 @@ pub async fn render(
 
 /// 打印结果经 WS 上报 qr_service（异步打印完成后调用）。
 /// 连接断开时只记日志不报错：本地打印已经发生，上报丢失不影响工位
-pub fn notify_print_result(job_id: &str, result: Result<(), String>) {
+pub fn notify_print_result(job_id: &str, printer: &str, result: Result<(), String>) {
     let ok = result.is_ok();
     let message = json!({
         "type": "print_result",
         "job_id": job_id,
+        "printer": printer,
         "ok": ok,
         "error": result.err(),
     })

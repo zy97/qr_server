@@ -75,10 +75,42 @@ fn open(path: &Path) -> Result<Connection, CustomError> {
             station TEXT PRIMARY KEY,
             printer TEXT,
             paper_width REAL,
-            paper_height REAL
+            paper_height REAL,
+            margin INTEGER,
+            y_offset INTEGER,
+            queue_timeout INTEGER
         );",
     )?;
+    ensure_agent_settings_columns(&conn)?;
     Ok(conn)
+}
+
+/// 旧库（只有 printer/paper_width/paper_height 三列）升级到含脚本参数列：
+/// SQLite 不支持 CREATE TABLE IF NOT EXISTS 增列，用 PRAGMA 检查后逐个 ALTER
+fn ensure_agent_settings_columns(conn: &Connection) -> Result<(), CustomError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(agent_settings)")?;
+    let columns: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (name, ddl) in [
+        (
+            "margin",
+            "ALTER TABLE agent_settings ADD COLUMN margin INTEGER",
+        ),
+        (
+            "y_offset",
+            "ALTER TABLE agent_settings ADD COLUMN y_offset INTEGER",
+        ),
+        (
+            "queue_timeout",
+            "ALTER TABLE agent_settings ADD COLUMN queue_timeout INTEGER",
+        ),
+    ] {
+        if !columns.iter().any(|c| c == name) {
+            conn.execute(ddl, [])?;
+        }
+    }
+    Ok(())
 }
 
 /// 工位级打印设置覆盖。字段为 None（NULL）时不覆盖：
@@ -90,6 +122,12 @@ pub struct AgentSettings {
     pub paper_width: Option<f64>,
     /// 自定义纸张高度（cm）
     pub paper_height: Option<f64>,
+    /// 打印横向边距（1/100 英寸，脚本 ($area.Width - margin) 中的固定值）
+    pub margin: Option<i32>,
+    /// 打印垂直偏移（1/100 英寸，脚本 ($area.Height - $h - y_offset) / 2 中的固定值）
+    pub y_offset: Option<i32>,
+    /// 打印队列监听超时（秒）
+    pub queue_timeout_secs: Option<i32>,
 }
 
 /// 保存指定工位的打印设置覆盖；同工位重复保存即更新
@@ -99,17 +137,24 @@ pub fn set_agent_settings(
     settings: &AgentSettings,
 ) -> Result<(), CustomError> {
     conn.execute(
-        "INSERT INTO agent_settings (station, printer, paper_width, paper_height)
-         VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO agent_settings
+             (station, printer, paper_width, paper_height, margin, y_offset, queue_timeout)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(station) DO UPDATE SET
              printer = excluded.printer,
              paper_width = excluded.paper_width,
-             paper_height = excluded.paper_height",
+             paper_height = excluded.paper_height,
+             margin = excluded.margin,
+             y_offset = excluded.y_offset,
+             queue_timeout = excluded.queue_timeout",
         params![
             station,
             settings.printer,
             settings.paper_width,
-            settings.paper_height
+            settings.paper_height,
+            settings.margin,
+            settings.y_offset,
+            settings.queue_timeout_secs,
         ],
     )?;
     Ok(())
@@ -122,13 +167,17 @@ pub fn get_agent_settings(
 ) -> Result<Option<AgentSettings>, CustomError> {
     Ok(conn
         .query_row(
-            "SELECT printer, paper_width, paper_height FROM agent_settings WHERE station = ?1",
+            "SELECT printer, paper_width, paper_height, margin, y_offset, queue_timeout
+             FROM agent_settings WHERE station = ?1",
             params![station],
             |r| {
                 Ok(AgentSettings {
                     printer: r.get(0)?,
                     paper_width: r.get(1)?,
                     paper_height: r.get(2)?,
+                    margin: r.get(3)?,
+                    y_offset: r.get(4)?,
+                    queue_timeout_secs: r.get(5)?,
                 })
             },
         )
@@ -402,7 +451,10 @@ mod tests {
                 station TEXT PRIMARY KEY,
                 printer TEXT,
                 paper_width REAL,
-                paper_height REAL
+                paper_height REAL,
+                margin INTEGER,
+                y_offset INTEGER,
+                queue_timeout INTEGER
             );",
         )
         .expect("create table");
@@ -411,20 +463,46 @@ mod tests {
 
 
     #[test]
+    fn old_agent_settings_table_is_migrated() {
+        // 模拟旧库：只有三列
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE agent_settings (
+                station TEXT PRIMARY KEY,
+                printer TEXT,
+                paper_width REAL,
+                paper_height REAL
+            );",
+        )
+        .expect("create old table");
+        ensure_agent_settings_columns(&conn).expect("migrate");
+        // 迁移后新列可用
+        let settings = AgentSettings {
+            margin: Some(28),
+            queue_timeout_secs: Some(90),
+            ..Default::default()
+        };
+        set_agent_settings(&conn, "S9", &settings).expect("set after migrate");
+        assert_eq!(get_agent_settings(&conn, "S9").unwrap(), Some(settings));
+    }
+    #[test]
     fn agent_settings_override_roundtrip() {
         let conn = test_conn();
         assert_eq!(get_agent_settings(&conn, "S1").unwrap(), None);
         let settings = AgentSettings {
             printer: Some("Zebra A".to_string()),
             paper_width: Some(10.0),
-            paper_height: None, // 允许只覆盖部分字段
+            ..Default::default() // 允许只覆盖部分字段
         };
         set_agent_settings(&conn, "S1", &settings).unwrap();
         assert_eq!(get_agent_settings(&conn, "S1").unwrap(), Some(settings));
         let updated = AgentSettings {
             printer: Some("Zebra B".to_string()),
-            paper_width: None,
             paper_height: Some(7.0),
+            margin: Some(30),
+            y_offset: Some(800),
+            queue_timeout_secs: Some(90),
+            ..Default::default()
         };
         set_agent_settings(&conn, "S1", &updated).unwrap(); // 重复保存即整体更新
         assert_eq!(get_agent_settings(&conn, "S1").unwrap(), Some(updated));

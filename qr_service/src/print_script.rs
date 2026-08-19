@@ -4,18 +4,42 @@
 
 use crate::config::CONFIG;
 
+/// 原 C# 打印服务的固定参数：横向边距、垂直偏移（1/100 英寸）、队列监听超时（秒）
+pub const DEFAULT_MARGIN: i32 = 28;
+pub const DEFAULT_Y_OFFSET: i32 = 780;
+pub const DEFAULT_QUEUE_TIMEOUT_SECS: i32 = 60;
+
+/// 打印脚本参数覆盖（全部可选；None 时回退 config.toml / 原 C# 默认值）。
+/// 由工位级设置提供（见 agent_ws / template_store::AgentSettings）
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PrintOverrides {
+    /// 自定义纸张宽度（cm）
+    pub paper_width: Option<f64>,
+    /// 自定义纸张高度（cm）
+    pub paper_height: Option<f64>,
+    /// 横向边距（1/100 英寸）
+    pub margin: Option<i32>,
+    /// 垂直偏移（1/100 英寸）
+    pub y_offset: Option<i32>,
+    /// 队列监听超时（秒）
+    pub queue_timeout_secs: Option<i32>,
+}
+
 /// 生成完整打印脚本（含任务监听）。printer_name 为空时打印到系统默认打印机。
 /// 纸张宽高（cm）可由工位级设置覆盖；None 时回退服务器 config.toml 的 [print] 段
 /// （cm → 1/100 英寸换算与原 C# 一致）
-pub fn build_print_script(
-    printer_name: &str,
-    paper_width: Option<f64>,
-    paper_height: Option<f64>,
-) -> String {
+pub fn build_print_script(printer_name: &str, overrides: &PrintOverrides) -> String {
     let print_config = &CONFIG.print;
-    let paper_width = (paper_width.unwrap_or(print_config.paper_width) / 2.54 * 100.0) as i32;
-    let paper_height = (paper_height.unwrap_or(print_config.paper_height) / 2.54 * 100.0) as i32;
-    build_script(printer_name, paper_width, paper_height)
+    let paper_width = (overrides.paper_width.unwrap_or(print_config.paper_width) / 2.54 * 100.0) as i32;
+    let paper_height = (overrides.paper_height.unwrap_or(print_config.paper_height) / 2.54 * 100.0) as i32;
+    build_script(
+        printer_name,
+        paper_width,
+        paper_height,
+        overrides.margin.unwrap_or(DEFAULT_MARGIN),
+        overrides.y_offset.unwrap_or(DEFAULT_Y_OFFSET),
+        overrides.queue_timeout_secs.unwrap_or(DEFAULT_QUEUE_TIMEOUT_SECS),
+    )
 }
 
 /// 打印逻辑移植自原 C# 打印服务的 Print(byte[] images)：
@@ -27,7 +51,14 @@ pub fn build_print_script(
 /// 脱机/缺纸/卡纸时任务会带错误状态滞留在队列里。给任务起唯一 DocumentName 后轮询队列：
 /// 出队=成功；带错误状态=失败（exit 1）；60s 未出队=超时失败（exit 2）。
 /// 小图片可能瞬间打完、首轮轮询前就已出队，2 秒宽限期内观察不到任务视为成功
-fn build_script(printer_name: &str, paper_width: i32, paper_height: i32) -> String {
+fn build_script(
+    printer_name: &str,
+    paper_width: i32,
+    paper_height: i32,
+    margin: i32,
+    y_offset: i32,
+    queue_timeout_secs: i32,
+) -> String {
     // PowerShell 单引号字符串内的单引号需要双写转义
     let escaped_printer_name = printer_name.replace('\'', "''");
     format!(
@@ -45,15 +76,15 @@ $pd.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize
 $pd.add_PrintPage({{
     param($s, $e)
     $area = $e.PageBounds;
-    $sc = ($area.Width - 28) / $script:img.Width;
+    $sc = ($area.Width - {margin}) / $script:img.Width;
     $w = [int]($script:img.Width * $sc);
     $h = [int]($script:img.Height * $sc);
-    $y = [int](($area.Height - $h - 780) / 2);
+    $y = [int](($area.Height - $h - {y_offset}) / 2);
     $e.Graphics.DrawImage($script:img, 0, $y, $w, $h);
 }});
 $pd.Print();
 $script:img.Dispose();
-$deadline = (Get-Date).AddSeconds(60);
+$deadline = (Get-Date).AddSeconds({queue_timeout_secs});
 $graceUntil = (Get-Date).AddSeconds(2);
 $seen = $false;
 while ((Get-Date) -lt $deadline) {{
@@ -72,7 +103,7 @@ while ((Get-Date) -lt $deadline) {{
     }}
     Start-Sleep -Milliseconds 500;
 }}
-[Console]::Error.WriteLine('打印任务超时（60 秒）仍未完成，请检查打印机状态');
+[Console]::Error.WriteLine('打印任务超时（{queue_timeout_secs} 秒）仍未完成，请检查打印机状态');
 exit 2;"#
     )
 }
@@ -84,16 +115,45 @@ mod tests {
     #[test]
     fn station_paper_override_wins_over_global_config() {
         // 15cm x 10cm -> 590 x 393 (1/100 英寸，向下取整)
-        let script = build_print_script("P1", Some(15.0), Some(10.0));
+        let script = build_print_script(
+            "P1",
+            &PrintOverrides {
+                paper_width: Some(15.0),
+                paper_height: Some(10.0),
+                ..Default::default()
+            },
+        );
         assert!(script.contains("PaperSize('CustomSize', 590, 393)"));
         // 未覆盖时回退 config.toml 默认值 10.57 x 29.70 -> 416 x 1169
-        let script = build_print_script("P1", None, None);
+        let script = build_print_script("P1", &PrintOverrides::default());
         assert!(script.contains("PaperSize('CustomSize', 416, 1169)"));
+    }
+
+    #[test]
+    fn script_params_override_wins_over_csharp_defaults() {
+        let script = build_print_script(
+            "P1",
+            &PrintOverrides {
+                margin: Some(40),
+                y_offset: Some(900),
+                queue_timeout_secs: Some(90),
+                ..Default::default()
+            },
+        );
+        assert!(script.contains("($area.Width - 40)"));
+        assert!(script.contains("($area.Height - $h - 900) / 2"));
+        assert!(script.contains("AddSeconds(90)"));
+        assert!(script.contains("超时（90 秒）"));
+        // 未覆盖时保持原 C# 固定值
+        let script = build_print_script("P1", &PrintOverrides::default());
+        assert!(script.contains("($area.Width - 28)"));
+        assert!(script.contains("($area.Height - $h - 780) / 2"));
+        assert!(script.contains("AddSeconds(60)"));
     }
     #[test]
     fn print_script_matches_csharp_logic() {
         // 10.57cm x 29.70cm -> 416 x 1169 (1/100 英寸)
-        let script = build_script("ZDesigner ZT231-300dpi ZPL", 416, 1169);
+        let script = build_script("ZDesigner ZT231-300dpi ZPL", 416, 1169, 28, 780, 60);
         assert!(script.contains("PaperSize('CustomSize', 416, 1169)"));
         assert!(script.contains("($area.Width - 28)"));
         assert!(script.contains("($area.Height - $h - 780) / 2"));
@@ -103,7 +163,7 @@ mod tests {
 
     #[test]
     fn print_script_reads_image_from_stdin_without_temp_file() {
-        let script = build_script("ZDesigner ZT231-300dpi ZPL", 416, 1169);
+        let script = build_script("ZDesigner ZT231-300dpi ZPL", 416, 1169, 28, 780, 60);
         assert!(script.contains("Add-Type -AssemblyName System.Drawing"));
         assert!(script.contains("[Convert]::FromBase64String([Console]::In.ReadToEnd())"));
         assert!(script.contains("[System.IO.MemoryStream]::new($bytes)"));
@@ -113,20 +173,20 @@ mod tests {
 
     #[test]
     fn print_script_escapes_single_quotes() {
-        let script = build_script("Bob's Printer", 416, 1169);
+        let script = build_script("Bob's Printer", 416, 1169, 28, 780, 60);
         assert!(script.contains("$printerName = 'Bob''s Printer';"));
     }
 
     #[test]
     fn empty_printer_falls_back_to_system_default() {
-        let script = build_script("", 416, 1169);
+        let script = build_script("", 416, 1169, 28, 780, 60);
         assert!(script.contains("$printerName = '';"));
         assert!(script.contains("Get-CimInstance Win32_Printer | Where-Object { $_.Default }"));
     }
 
     #[test]
     fn print_script_monitors_job_until_result() {
-        let script = build_script("ZDesigner ZT231-300dpi ZPL", 416, 1169);
+        let script = build_script("ZDesigner ZT231-300dpi ZPL", 416, 1169, 28, 780, 60);
         // 唯一任务名 + 队列轮询 + 三类结局：错误状态、超时、出队成功
         assert!(script.contains("$pd.DocumentName = 'print-agent-'"));
         assert!(script.contains("Get-PrintJob -PrinterName $printerName"));
@@ -140,7 +200,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn print_script_is_valid_powershell() {
-        let script = build_script("ZDesigner ZT231-300dpi ZPL", 416, 1169);
+        let script = build_script("ZDesigner ZT231-300dpi ZPL", 416, 1169, 28, 780, 60);
         let script_path = std::env::temp_dir().join(format!("qr-print-{}.ps1", std::process::id()));
         // Windows PowerShell 5.1 对无 BOM 文件按 ANSI 读取，中文会乱码——加 BOM 让它按 UTF-8 解析
         std::fs::write(&script_path, format!("\u{feff}{script}")).unwrap();

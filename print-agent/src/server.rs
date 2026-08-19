@@ -29,6 +29,7 @@ fn router() -> Router {
         .layer(CorsLayer::permissive().allow_private_network(AllowPrivateNetwork::yes()))
 }
 
+
 async fn health() -> String {
     if crate::ws_client::is_connected() {
         "ok, qr_service 已连接".to_string()
@@ -59,31 +60,38 @@ async fn label_handler(
     let printer = query
         .printer
         .unwrap_or_else(|| CONFIG.print.printer_name.clone());
-    let (job_id, png, script) = match crate::ws_client::render(labels, query.template, printer).await {
+    let (job_id, outcome) = match crate::ws_client::render(labels, query.template, printer).await {
         Ok(ok) => ok,
         Err(err) => return (StatusCode::BAD_GATEWAY, format!("渲染失败: {err}")).into_response(),
     };
+    let crate::ws_client::RenderOutcome {
+        png,
+        script,
+        printer,
+        printer_source,
+    } = outcome;
     // 渲染成功即响应；打印在后台执行，不阻塞工位浏览器。
     // 打印结果经 WS 上报 qr_service 日志（同 job_id 对账），本机日志同样记录
-    tracing::info!(job_id, labels = labels_count, "已受理打印任务，转入后台打印");
+    tracing::info!(
+        job_id,
+        labels = labels_count,
+        printer,
+        printer_source,
+        "已受理打印任务，转入后台打印"
+    );
     let png_for_print = png.clone();
-    let job_id_header = job_id.clone();
     tokio::task::spawn_blocking(move || {
         let result = crate::print::print_with_script(&script, &png_for_print)
             .map_err(|err| format!("{err:#}"));
         match &result {
-            Ok(()) => tracing::info!(job_id, "打印完成"),
-            Err(err) => tracing::warn!(job_id, error = %err, "打印失败"),
+            Ok(()) => tracing::info!(job_id, printer, "打印完成"),
+            Err(err) => tracing::warn!(job_id, printer, error = %err, "打印失败"),
         }
-        crate::ws_client::notify_print_result(&job_id, result);
+        crate::ws_client::notify_print_result(&job_id, &printer, result);
     });
-    // 响应头带 job_id，便于与 qr_service 的 print_result 日志对账
     (
         StatusCode::OK,
-        [
-            (axum::http::header::CONTENT_TYPE, "image/png"),
-            (axum::http::HeaderName::from_static("x-print-job-id"), job_id_header.as_str()),
-        ],
+        [(axum::http::header::CONTENT_TYPE, "image/png")],
         png,
     )
         .into_response()

@@ -9,7 +9,7 @@ qr_service ──渲染 PNG，沿同一条 WS 返回──▶ print-agent ──
 ```
 
 - 服务器**不需要配置任何工位地址**：新增工位 = 装 print-agent 并填服务器地址
-- /label 渲染成功即返回标签 PNG，不等待打印；打印失败（脱机/缺纸/卡纸/超时）的真实原因经 WS 上报 qr_service 日志（按 job_id 对账），agent 本机日志同步记录
+- /label 渲染成功即返回标签 PNG，不等待打印；真实结果（脱机/缺纸/卡纸/超时）经 WS 上报 qr_service：代理管理页面 `/agents` 展示最近打印记录（接口 `GET /api/print-results`），同时写入服务器与 agent 本机日志
 - 打印脚本（纸张/边距/队列监听规则）由 qr_service 统一生成、随渲染结果经 WS 下发，调整打印行为只需升级服务器，工位 agent 不用动
 - 打印代理管理（可为每个工位覆盖打印机与纸张尺寸，未覆盖时用代理本地配置）：`http://<服务器>:9095/agents`；在线工位 API：`http://<服务器>:9095/api/agents`；模板设计器：`http://<服务器>:9095/designer`
 
