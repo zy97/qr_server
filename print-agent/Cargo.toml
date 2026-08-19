@@ -1,6 +1,6 @@
 [package]
 name = "print-agent"
-version = "0.9.0"
+version = "1.0.0"
 edition = "2021"
 description = "标签打印代理：接收 PNG 并发送到本机 Windows 打印机"
 repository = "https://github.com/zy97/qr_server"
@@ -14,7 +14,7 @@ tokio = { version = "1", features = ["full"] }
 toml = "0.8"
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
-tracing-subscriber = { version = "0.3.23", features = ["registry", "std"] }
+tracing-subscriber = { version = "0.3.23", features = ["registry", "std", "local-time"] }
 serde_json = "1.0"
 futures-util = "0.3"
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect"] } # 内网纯 ws://，不需要 TLS
@@ -22,6 +22,14 @@ tower-http = { version = "0.6", features = ["cors"] } # 浏览器跨域调本机
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8"
+# 服务会话（Session 0）里把打印进程投递到登录用户会话（WSD 等按用户安装的打印机才能用）
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Pipes",
+] }
 
 # 打印代理只部署 Windows，发布只构建 Windows 包（package-local，覆盖 dist-workspace.toml 的全局 targets）
 [package.metadata.dist]

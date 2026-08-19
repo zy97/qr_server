@@ -64,6 +64,11 @@ pub struct PrintConfig {
     /// 自定义纸张高度（cm）
     #[serde(default = "default_paper_height")]
     pub paper_height: f64,
+    /// 自定义打印脚本模板文件路径（相对工作目录）。
+    /// 配置后每次打印实时读该文件（改脚本不用重新编译），缺失/读取失败回退内置模板；
+    /// 占位符见 print_script 模块文档（{{printer_name}} {{paper_width}} 等）
+    #[serde(default)]
+    pub script_template: Option<String>,
 }
 
 impl Default for PrintConfig {
@@ -71,6 +76,7 @@ impl Default for PrintConfig {
         Self {
             paper_width: default_paper_width(),
             paper_height: default_paper_height(),
+            script_template: None,
         }
     }
 }

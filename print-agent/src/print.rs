@@ -20,6 +20,35 @@ pub fn print_with_script(script: &str, png: &[u8]) -> anyhow::Result<()> {
 }
 
 fn run_print_process(script: &str, encoded: &str) -> anyhow::Result<()> {
+    // Windows 服务（SYSTEM/Session 0）看不到按用户安装的打印机（如 WSD 端口），
+    // 优先把打印进程投递到当前登录用户的会话执行；无人登录或投递失败时回退服务会话
+    #[cfg(windows)]
+    match crate::user_session::spawn_in_active_user_session(script) {
+        Ok(Some(mut process)) => {
+            info!("打印进程已在当前登录用户会话中启动");
+            // 子进程可能在启动阶段就退出（此时写 stdin 会得到 109 管道已结束），
+            // 必须把它的退出码和 stderr 一起带出来，否则真实原因不可见
+            if let Err(write_err) = process.finish_stdin(encoded.as_bytes()) {
+                let (code, stderr) = process
+                    .wait_with_timeout(Duration::from_secs(30))
+                    .unwrap_or((None, Vec::new()));
+                let detail = String::from_utf8_lossy(&stderr).trim().to_string();
+                anyhow::bail!(
+                    "写入打印进程失败: {write_err}；子进程退出码 {code:?}；子进程输出: {detail}"
+                );
+            }
+            info!(bytes = encoded.len(), "图像数据已写入打印进程，等待打印结束");
+            let (code, stderr) = process.wait_with_timeout(Duration::from_secs(120))?;
+            // stderr 可能多行（阶段标记等），连成一行避免后续行丢失时间戳
+            let stderr_text = String::from_utf8_lossy(&stderr).trim().replace('\n', " | ");
+            info!(status = ?code, stderr = %stderr_text, "打印进程已退出");
+            anyhow::ensure!(code == Some(0), "{}", print_failure_message(code, &stderr));
+            return Ok(());
+        }
+        Ok(None) => info!("未检测到登录用户会话，回退服务会话打印"),
+        Err(err) => tracing::warn!(error = %err, "用户会话打印启动失败，回退服务会话打印"),
+    }
+
     let mut child = Command::new("powershell")
         .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", script])
         .stdin(Stdio::piped())
@@ -36,11 +65,10 @@ fn run_print_process(script: &str, encoded: &str) -> anyhow::Result<()> {
     // 硬超时兜底：脚本自身的队列监听有 60s 上限，但驱动弹窗（如 Microsoft Print to PDF
     // 的“另存为”对话框）会让 $pd.Print() 永远阻塞，无限等待会挂死后台任务
     let output = wait_with_timeout(&mut child, Duration::from_secs(120))?;
-    info!(
-        status = ?output.status.code(),
-        stderr = %String::from_utf8_lossy(&output.stderr).trim(),
-        "打印进程已退出"
-    );
+    let stderr_text = String::from_utf8_lossy(&output.stderr)
+        .trim()
+        .replace('\n', " | ");
+    info!(status = ?output.status.code(), stderr = %stderr_text, "打印进程已退出");
     anyhow::ensure!(
         output.status.success(),
         "{}",
@@ -88,7 +116,7 @@ fn wait_with_timeout(
 
 /// 脚本报错写在 stderr；为空时（如 powershell 自身异常）给兜底描述
 fn print_failure_message(exit_code: Option<i32>, stderr: &[u8]) -> String {
-    let detail = String::from_utf8_lossy(stderr).trim().to_string();
+    let detail = String::from_utf8_lossy(stderr).trim().replace('\n', " | ");
     if detail.is_empty() {
         format!("powershell 打印进程异常退出（退出码 {:?}）", exit_code)
     } else {

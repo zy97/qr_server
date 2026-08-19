@@ -8,3 +8,9 @@ port = 9095
 [template]
 # 保存模板时是否把渲染 HTML 落地到 templates/template.html（仅供本地查看，渲染以数据库为准）
 save_html = true
+
+[print]
+# 可选：自定义打印脚本模板文件（相对工作目录）。配置后每次打印实时读取，
+# 改脚本内容不用重新编译也不用重启服务；文件缺失或读取失败时回退内置模板
+# 占位符：{{printer_name}} {{paper_width}} {{paper_height}} {{margin}} {{y_offset}} {{queue_timeout}}
+script_template = "print_script.ps1"

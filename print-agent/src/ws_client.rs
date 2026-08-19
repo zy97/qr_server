@@ -177,11 +177,18 @@ fn local_printers() -> Vec<String> {
         ])
         .output();
     match output {
-        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty())
-            .collect(),
+        Ok(output) if output.status.success() => {
+            // 排序去重：Get-Printer 每次返回顺序可能抖动，
+            // 不排序会让“列表是否变化”的比较反复误报重新上报
+            let mut printers: Vec<String> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .collect();
+            printers.sort();
+            printers.dedup();
+            printers
+        }
         _ => Vec::new(),
     }
 }
