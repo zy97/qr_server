@@ -54,6 +54,7 @@ async fn label_handler(
                 .into_response()
         }
     };
+    let labels_count = labels.len();
     // 打印机名随渲染请求上行，qr_service 把它编进下发的打印脚本
     let printer = query
         .printer
@@ -64,7 +65,9 @@ async fn label_handler(
     };
     // 渲染成功即响应；打印在后台执行，不阻塞工位浏览器。
     // 打印结果经 WS 上报 qr_service 日志（同 job_id 对账），本机日志同样记录
+    tracing::info!(job_id, labels = labels_count, "已受理打印任务，转入后台打印");
     let png_for_print = png.clone();
+    let job_id_header = job_id.clone();
     tokio::task::spawn_blocking(move || {
         let result = crate::print::print_with_script(&script, &png_for_print)
             .map_err(|err| format!("{err:#}"));
@@ -74,9 +77,13 @@ async fn label_handler(
         }
         crate::ws_client::notify_print_result(&job_id, result);
     });
+    // 响应头带 job_id，便于与 qr_service 的 print_result 日志对账
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "image/png")],
+        [
+            (axum::http::header::CONTENT_TYPE, "image/png"),
+            (axum::http::HeaderName::from_static("x-print-job-id"), job_id_header.as_str()),
+        ],
         png,
     )
         .into_response()
